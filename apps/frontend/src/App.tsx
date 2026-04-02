@@ -19,7 +19,7 @@ import { Withdraw }          from './screens/Withdraw';
 import { Profile }           from './screens/Profile';
 import { AdminDashboard }    from './screens/AdminDashboard';
 
-const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://toncheckersapp.netlify.app'}/tonconnect-manifest.json`;
+const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://toncheckers.pages.dev'}/tonconnect-manifest.json`;
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { accessToken } = useStore();

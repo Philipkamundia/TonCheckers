@@ -1,7 +1,7 @@
 {
-  "url":         "https://toncheckersapp.netlify.app",
-  "name":        "TonCheckers",
-  "iconUrl":     "https://toncheckersapp.netlify.app/gameicon.png",
-  "termsOfUseUrl": "https://toncheckersapp.netlify.app/terms",
-  "privacyPolicyUrl": "https://toncheckersapp.netlify.app/privacy"
+  "url":              "https://toncheckers.pages.dev",
+  "name":             "TonCheckers",
+  "iconUrl":          "https://toncheckers.pages.dev/gameicon.png",
+  "termsOfUseUrl":    "https://toncheckers.pages.dev/terms",
+  "privacyPolicyUrl": "https://toncheckers.pages.dev/privacy"
 }
