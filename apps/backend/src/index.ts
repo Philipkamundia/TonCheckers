@@ -27,6 +27,9 @@ const app        = express();
 const httpServer = createServer(app);
 const PORT       = process.env.PORT || 3001;
 
+// Trust Railway/proxy X-Forwarded-For headers
+app.set('trust proxy', 1);
+
 // Fail fast on missing required env vars
 const REQUIRED_ENV = ['DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'TELEGRAM_BOT_TOKEN'];
 const missing = REQUIRED_ENV.filter(k => !process.env[k]);
