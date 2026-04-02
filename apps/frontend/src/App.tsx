@@ -17,7 +17,7 @@ import { Deposit }           from './screens/Deposit';
 import { Withdraw }          from './screens/Withdraw';
 import { AdminDashboard }    from './screens/AdminDashboard';
 
-const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://checkton.app'}/tonconnect-manifest.json`;
+const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://ton-checkers-beta.vercel.app'}/tonconnect-manifest.json`;
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { accessToken } = useStore();

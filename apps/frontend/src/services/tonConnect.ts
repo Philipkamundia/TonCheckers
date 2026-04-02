@@ -8,7 +8,7 @@
 import { TonConnectUI, type ConnectedWallet } from '@tonconnect/ui-react';
 
 // Manifest must be hosted on your domain — tells Telegram which app is connecting
-const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://checkton.app'}/tonconnect-manifest.json`;
+const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://ton-checkers-beta.vercel.app'}/tonconnect-manifest.json`;
 
 export const tonConnectUI = new TonConnectUI({ manifestUrl: MANIFEST_URL });
 

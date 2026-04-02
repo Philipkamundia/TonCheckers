@@ -1,7 +1,7 @@
 {
-  "url":         "https://checkton.app",
+  "url":         "https://ton-checkers-beta.vercel.app",
   "name":        "CheckTON",
-  "iconUrl":     "https://checkton.app/gameicon.png",
-  "termsOfUseUrl": "https://checkton.app/terms",
-  "privacyPolicyUrl": "https://checkton.app/privacy"
+  "iconUrl":     "https://ton-checkers-beta.vercel.app/gameicon.png",
+  "termsOfUseUrl": "https://ton-checkers-beta.vercel.app/terms",
+  "privacyPolicyUrl": "https://ton-checkers-beta.vercel.app/privacy"
 }
