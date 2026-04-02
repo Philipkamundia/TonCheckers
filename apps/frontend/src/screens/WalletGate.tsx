@@ -21,22 +21,30 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       hideMainButton();
       return;
     }
-    handleAuth();
+    doAuth(wallet, initData);
   }, [wallet]);
 
   async function handleAuth() {
-    if (!wallet || !initData) return;
+    if (!wallet) return;
+    await doAuth(wallet, initData);
+  }
+
+  async function doAuth(connectedWallet: NonNullable<typeof wallet>, currentInitData: string) {
+    if (!currentInitData) {
+      setError('Telegram session not found. Please reopen the app from Telegram.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const address = wallet.account.address;
-      const proof   = wallet.connectItems?.tonProof;
+      const address = connectedWallet.account.address;
+      const proof   = connectedWallet.connectItems?.tonProof;
       let res;
       if (proof && 'proof' in proof) {
-        res = await authApi.connect({ walletAddress: address, proof: proof.proof, initData });
+        res = await authApi.connect({ walletAddress: address, proof: proof.proof, initData: currentInitData });
       } else {
         try {
-          res = await authApi.verify({ walletAddress: address, initData });
+          res = await authApi.verify({ walletAddress: address, initData: currentInitData });
         } catch (verifyErr: unknown) {
           const status = (verifyErr as { response?: { status?: number } })?.response?.status;
           if (status === 404) {
