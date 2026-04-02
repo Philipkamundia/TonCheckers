@@ -2,22 +2,18 @@
  * WalletGate.tsx — Wallet connection screen
  */
 import { useState, useEffect } from 'react';
+import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
 import { useTelegram } from '../hooks/useTelegram';
 import { useStore } from '../store';
 import { authApi } from '../services/api';
-import { tonConnectUI } from '../services/tonConnect';
 
 export function WalletGate({ onConnected }: { onConnected: () => void }) {
-  const { initData, haptic, showMainButton, hideMainButton } = useTelegram();
+  const { initData, haptic, hideMainButton } = useTelegram();
   const { setUser, setTokens } = useStore();
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
-  const [wallet,  setWallet]  = useState(tonConnectUI.wallet);
-
-  // Track wallet connection state
-  useEffect(() => {
-    return tonConnectUI.onStatusChange((w) => setWallet(w));
-  }, []);
+  const [tonConnectUI] = useTonConnectUI();
+  const wallet = useTonWallet();
 
   // Auto-authenticate when wallet connects
   useEffect(() => {
@@ -25,8 +21,6 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       hideMainButton();
       return;
     }
-    // Try to show MainButton as well, but also auto-trigger auth
-    showMainButton('Continue', handleAuth, { color: '#2AABEE' });
     handleAuth();
   }, [wallet]);
 
