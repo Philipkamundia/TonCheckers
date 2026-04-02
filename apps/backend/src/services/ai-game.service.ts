@@ -29,10 +29,10 @@ export class AiGameService {
 
     const { rows: [game] } = await pool.query(
       `INSERT INTO games
-         (mode, status, player1_id, stake, board_state, active_player, ai_difficulty)
-       VALUES ('ai', 'active', $1, 0, $2, 1, $3)
+         (mode, status, player1_id, stake, board_state, active_player, ai_difficulty, started_at)
+       VALUES ('ai', 'active', $1, 0, $2, 1, $3, NOW())
        RETURNING id`,
-      [userId, JSON.stringify(state), difficulty],
+      [userId, state, difficulty],
     );
 
     await GameTimerService.startTimer(game.id, 1);
@@ -91,7 +91,7 @@ export class AiGameService {
     if (afterHumanResult.status !== 'ongoing') {
       await pool.query(
         `UPDATE games SET status='completed', board_state=$1, ended_at=NOW(), updated_at=NOW() WHERE id=$2`,
-        [JSON.stringify(state1), gameId],
+        [state1, gameId],
       );
       await GameTimerService.clearTimer(gameId);
       return {
@@ -114,7 +114,7 @@ export class AiGameService {
       // AI has no moves — human wins
       await pool.query(
         `UPDATE games SET status='completed', board_state=$1, ended_at=NOW(), updated_at=NOW() WHERE id=$2`,
-        [JSON.stringify(state1), gameId],
+        [state1, gameId],
       );
       await GameTimerService.clearTimer(gameId);
       return {
@@ -130,7 +130,7 @@ export class AiGameService {
     // Persist and reset timer for human's next turn
     await pool.query(
       `UPDATE games SET board_state=$1, active_player=1, move_count=$2, updated_at=NOW() WHERE id=$3`,
-      [JSON.stringify(state2), state2.moveCount, gameId],
+      [state2, state2.moveCount, gameId],
     );
     await GameTimerService.startTimer(gameId, 1);
 

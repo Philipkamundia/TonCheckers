@@ -38,7 +38,7 @@ export class GameService {
          player1_elo_before AS "player1EloBefore",
          player2_elo_before AS "player2EloBefore",
          created_at AS "createdAt"`,
-      [status, player1Id, player2Id, stake, JSON.stringify(initialState), player1Elo, player2Elo],
+      [status, player1Id, player2Id, stake, initialState, player1Elo, player2Elo],
     );
     return game as GameRecord;
   }
@@ -64,7 +64,7 @@ export class GameService {
     await pool.query(
       `UPDATE games SET board_state=$1, active_player=$2, move_count=$3,
          started_at=COALESCE(started_at,NOW()), updated_at=NOW() WHERE id=$4`,
-      [JSON.stringify(state), activePlayer, moveCount, gameId],
+      [state, activePlayer, moveCount, gameId],
     );
   }
 
