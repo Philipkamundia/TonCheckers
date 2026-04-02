@@ -4,7 +4,7 @@
  * Resign button available at any point.
  */
 import { useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
 import { useStore } from '../store';
 import { useGame, type Board } from '../hooks/useGame';
@@ -23,7 +23,6 @@ export function GameRoom() {
   const { gameId } = useParams<{ gameId: string }>();
   const { showBackButton, haptic } = useTelegram();
   const { myPlayerNum } = useStore();
-  const navigate = useNavigate();
 
   const {
     gameState, selectedPiece, setSelectedPiece, invalidMove, makeMove, resign,

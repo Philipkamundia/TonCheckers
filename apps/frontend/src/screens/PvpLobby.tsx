@@ -13,8 +13,8 @@ const PRESET_STAKES = ['0.1', '0.5', '1', '2', '5', '10'];
 
 export function PvpLobby() {
   const { showBackButton, showMainButton, hideMainButton, setMainButtonLoading, haptic } = useTelegram();
-  const { balance, setActiveGame, setPendingLobby } = useStore();
-  const { on, emit } = useWebSocket();
+  const { balance, setPendingLobby } = useStore();
+  const { on } = useWebSocket();
   const navigate = useNavigate();
 
   const [stake,       setStake]       = useState('1');

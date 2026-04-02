@@ -35,8 +35,8 @@ export async function requestWalletConnection(): Promise<ConnectedWallet | null>
   }
 }
 
-export function getConnectedWallet(): ConnectedWallet | null {
-  return tonConnectUI.wallet;
+export function getConnectedWallet() {
+  return tonConnectUI.wallet ?? null;
 }
 
 export function getWalletAddress(): string | null {
@@ -48,7 +48,7 @@ export async function disconnectWallet(): Promise<void> {
 }
 
 /** Build TonConnect proof for POST /auth/connect */
-export async function buildProof(nonce: string): Promise<unknown | null> {
+export async function buildProof(_nonce: string): Promise<unknown | null> {
   try {
     const result = await tonConnectUI.sendTransaction({
       // This triggers TonConnect proof generation in the wallet app

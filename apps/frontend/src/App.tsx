@@ -7,7 +7,6 @@ import { Home }              from './screens/Home';
 import { PvpLobby }          from './screens/PvpLobby';
 import { LobbyRoom }         from './screens/LobbyRoom';
 import { GameRoom }          from './screens/GameRoom';
-import { PostGame }          from './screens/PostGame';
 import { AiSelect }          from './screens/AiSelect';
 import { AiGameRoom }        from './screens/AiGameRoom';
 import { TournamentList }    from './screens/TournamentList';

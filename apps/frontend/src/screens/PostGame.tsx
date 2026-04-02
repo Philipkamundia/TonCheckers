@@ -21,8 +21,8 @@ interface GameResult {
   };
 }
 
-export function PostGame({ gameId, result, myPlayerNum }: {
-  gameId:      string;
+export function PostGame({ result, myPlayerNum }: {
+  gameId?:     string;
   result?:     GameResult;
   myPlayerNum: 1 | 2 | null;
 }) {

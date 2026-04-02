@@ -1,4 +1,5 @@
 import pool from '../config/db.js';
+import { type PoolClient } from 'pg';
 import { NotificationService } from './notification.service.js';
 import { logger } from '../utils/logger.js';
 import type { GameState } from '../engine/board.js';
@@ -22,7 +23,7 @@ export class GameService {
   static async createGame(
     player1Id: string, player2Id: string, stake: string,
     player1Elo: number, player2Elo: number, initialState: GameState,
-    db: typeof pool | Awaited<ReturnType<typeof pool.connect>> = pool,
+    db: typeof pool | PoolClient = pool,
     status: 'active' | 'waiting' = 'active',
   ): Promise<GameRecord> {
     const { rows: [game] } = await (db as typeof pool).query(

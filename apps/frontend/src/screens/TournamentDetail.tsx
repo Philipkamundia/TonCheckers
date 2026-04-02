@@ -18,7 +18,6 @@ export function TournamentDetail() {
   const navigate = useNavigate();
 
   const [tournament, setTournament] = useState<TournamentDetail | null>(null);
-  const [joining,    setJoining]    = useState(false);
   const [joined,     setJoined]     = useState(false);
   const [error,      setError]      = useState<string | null>(null);
 
@@ -148,7 +147,7 @@ const styles: Record<string, React.CSSProperties> = {
   matchCard:       { display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--tg-theme-bg-color)', borderRadius:10, padding:'10px 12px', marginBottom:6 },
   matchPlayer:     { color:'var(--tg-theme-text-color)', fontSize:13, flex:1 },
   winner:          { color:'#4CAF50', fontWeight:700 },
-  vs:              { color:'var(--tg-theme-hint-color)', fontSize:12, paddingHorizontal:8 },
+  vs:              { color:'var(--tg-theme-hint-color)', fontSize:12, padding:'0 8px' },
   participantRow:  { display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid var(--tg-theme-bg-color)' },
   participantName: { color:'var(--tg-theme-text-color)', fontSize:14 },
   participantElo:  { color:'var(--tg-theme-hint-color)', fontSize:13 },

@@ -1,4 +1,4 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 import { logger } from '../utils/logger.js';
 
 export const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {

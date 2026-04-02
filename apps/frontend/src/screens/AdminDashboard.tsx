@@ -27,7 +27,7 @@ export function AdminDashboard() {
   const [tab,           setTab]           = useState<AdminTab>('summary');
   const [authed,        setAuthed]        = useState(false);
   const [authError,     setAuthError]     = useState<string | null>(null);
-  const [data,          setData]          = useState<unknown>(null);
+  const [data,          setData]          = useState<Record<string, unknown> | null>(null);
   const [loading,       setLoading]       = useState(false);
 
   // Auth: connect treasury wallet and sign challenge
@@ -47,15 +47,14 @@ export function AdminDashboard() {
       let signature: string;
       let stateInit: string;
       try {
-        const result = await tonConnectUI.sendTransaction({
+        await tonConnectUI.sendTransaction({
           validUntil: Math.floor(Date.now() / 1000) + 300,
           messages: [],
         } as Parameters<typeof tonConnectUI.sendTransaction>[0]);
-        // TonConnect proof is in wallet.connectItems — use the existing proof if available
         const proof = tonConnectUI.wallet?.connectItems?.tonProof;
         if (!proof || !('proof' in proof)) throw new Error('No proof available');
         signature = proof.proof.signature;
-        stateInit = proof.proof.stateInit ?? '';
+        stateInit = (proof.proof as { signature: string; stateInit?: string }).stateInit ?? '';
       } catch {
         setAuthError('Wallet signing failed — reconnect your treasury wallet');
         return;
@@ -137,8 +136,8 @@ export function AdminDashboard() {
   );
 }
 
-function AdminTabContent({ tab, data, onRefresh }: { tab: AdminTab; data: unknown; onRefresh: () => void }) {
-  const d = data as Record<string, unknown>;
+function AdminTabContent({ tab, data, onRefresh }: { tab: AdminTab; data: Record<string, unknown>; onRefresh: () => void }) {
+  const d = data;
 
   if (tab === 'summary' && d.summary) {
     const s = d.summary as Record<string, number>;

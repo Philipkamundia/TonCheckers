@@ -19,8 +19,6 @@ export function Withdraw() {
   const [result,  setResult]  = useState<{ success: boolean; message: string } | null>(null);
   const walletAddress         = getWalletAddress();
   const available             = parseFloat(balance?.available ?? '0');
-  // Use stable viewport height so content isn't hidden behind keyboard
-  const { stableViewportHeight } = useTelegram();
 
   useEffect(() => { return showBackButton(() => navigate('/')); }, []);
 
@@ -89,7 +87,7 @@ export function Withdraw() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container:       { padding:'16px', background:'var(--tg-theme-bg-color)', minHeight: stableViewportHeight || '100vh', paddingBottom:80 },
+  container:       { padding:'16px', background:'var(--tg-theme-bg-color)', minHeight:'100vh', paddingBottom:80 },
   title:           { color:'var(--tg-theme-text-color)', fontSize:22, fontWeight:700, margin:'0 0 16px' },
   balanceCard:     { display:'flex', justifyContent:'space-between', alignItems:'center', background:'var(--tg-theme-secondary-bg-color)', borderRadius:14, padding:'16px', marginBottom:20 },
   balanceLabel:    { color:'var(--tg-theme-hint-color)', fontSize:14 },

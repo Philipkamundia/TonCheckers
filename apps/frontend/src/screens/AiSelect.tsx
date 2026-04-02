@@ -18,7 +18,7 @@ const DIFFICULTIES: { id: Difficulty; label: string; desc: string; emoji: string
 ];
 
 export function AiSelect() {
-  const { showBackButton, showMainButton, hideMainButton, haptic } = useTelegram();
+  const { showBackButton, showMainButton, haptic } = useTelegram();
   const { emit, on } = useWebSocket();
   const { setActiveGame } = useStore();
   const navigate = useNavigate();
