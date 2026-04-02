@@ -24,6 +24,15 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
     doAuth(wallet, initData);
   }, [wallet]);
 
+  function openWalletModal() {
+    // Request tonProof so the wallet signs a challenge on connect (enables new user registration)
+    tonConnectUI.setConnectRequestParameters({
+      state: 'ready',
+      value: { tonProof: `checkers-${Date.now()}` },
+    });
+    tonConnectUI.openModal();
+  }
+
   async function handleAuth() {
     if (!wallet) return;
     await doAuth(wallet, initData);
@@ -43,17 +52,8 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       if (proof && 'proof' in proof) {
         res = await authApi.connect({ walletAddress: address, proof: proof.proof, initData: currentInitData });
       } else {
-        try {
-          res = await authApi.verify({ walletAddress: address, initData: currentInitData });
-        } catch (verifyErr: unknown) {
-          const status = (verifyErr as { response?: { status?: number } })?.response?.status;
-          if (status === 404) {
-            setError('Please disconnect and reconnect your wallet to complete registration.');
-            haptic.error();
-            return;
-          }
-          throw verifyErr;
-        }
+        // No proof — verify/register via initData (backend will create user if new)
+        res = await authApi.verify({ walletAddress: address, initData: currentInitData });
       }
       setTokens(res.data.accessToken, res.data.refreshToken);
       setUser(res.data.user);
@@ -78,10 +78,9 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
         {!wallet ? (
           <>
             <p style={styles.cardText}>Connect your TON wallet to start playing</p>
-            {/* Single custom button — no TonConnectButton component to avoid double rendering */}
             <button
               style={styles.connectBtn}
-              onClick={() => tonConnectUI.openModal()}
+              onClick={openWalletModal}
               disabled={loading}
             >
               Connect Wallet
@@ -96,11 +95,7 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
             {loading ? (
               <p style={styles.loading}>Authenticating…</p>
             ) : (
-              <button
-                style={styles.connectBtn}
-                onClick={handleAuth}
-                disabled={loading}
-              >
+              <button style={styles.connectBtn} onClick={handleAuth} disabled={loading}>
                 Continue
               </button>
             )}

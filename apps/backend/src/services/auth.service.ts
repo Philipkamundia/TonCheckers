@@ -264,19 +264,18 @@ export class AuthService {
   static async verify(
     walletAddress: string,
     initDataRaw: string,
-  ): Promise<{ user: UserProfile; tokens: AuthTokens }> {
+  ): Promise<{ user: UserProfile; tokens: AuthTokens; isNew: boolean }> {
     const initResult = validateInitData(initDataRaw);
     if (!initResult.valid) {
       throw new AppError(401, `Invalid initData: ${initResult.error}`, 'INIT_DATA_INVALID');
     }
 
-    const user = await AuthService.findByWallet(walletAddress);
-    if (!user) {
-      throw new AppError(404, 'Wallet not registered — use /auth/connect first', 'USER_NOT_FOUND');
-    }
+    let user = await AuthService.findByWallet(walletAddress);
+    const isNew = !user;
+    if (!user) user = await AuthService.createUser(walletAddress, initResult.telegramId);
 
     const tokens = AuthService.issueTokens(user.id, walletAddress);
-    return { user, tokens };
+    return { user, tokens, isNew };
   }
 
   /** POST /auth/refresh — new access token from refresh token */

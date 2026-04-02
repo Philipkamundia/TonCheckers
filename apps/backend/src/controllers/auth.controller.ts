@@ -44,9 +44,9 @@ export const authController = {
       }
 
       const { walletAddress, initData } = parsed.data;
-      const { user, tokens } = await AuthService.verify(walletAddress, initData);
+      const { user, tokens, isNew } = await AuthService.verify(walletAddress, initData);
 
-      return res.json({ ok: true, user, ...tokens });
+      return res.status(isNew ? 201 : 200).json({ ok: true, isNew, user, ...tokens });
     } catch (err) {
       return next(err);
     }
