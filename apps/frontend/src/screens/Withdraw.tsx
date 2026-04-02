@@ -1,5 +1,5 @@
 /**
- * Withdraw.tsx — Withdrawal screen (PRD §4)
+ * Withdraw.tsx — Withdrawal screen as per(PRD §4)
  * Destination locked to connected wallet — no overrides.
  * PRD §16: Confirm Stake button = MainButton
  */
