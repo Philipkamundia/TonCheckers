@@ -80,7 +80,10 @@ export class AiGameService {
       m => m.from.row === from.row && m.from.col === from.col &&
            m.to.row   === to.row   && m.to.col   === to.col,
     );
-    if (!move) return { valid: false, reason: 'Illegal move' };
+    if (!move) {
+      logger.warn(`[AI] Illegal move game=${gameId} from=(${from.row},${from.col}) to=(${to.row},${to.col}) moveCount=${state.moveCount} legalCount=${legalMoves.length} legal=${JSON.stringify(legalMoves.map(m => ({ fr: m.from.row, fc: m.from.col, tr: m.to.row, tc: m.to.col })))} board=${JSON.stringify(state.board)}`);
+      return { valid: false, reason: 'Illegal move' };
+    }
 
     const afterHuman = applyMoveWithPromotion(state.board, move);
     const hash1      = hashBoardState(afterHuman, 2);
