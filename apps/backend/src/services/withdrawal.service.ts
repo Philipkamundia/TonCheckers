@@ -188,7 +188,9 @@ export class WithdrawalService {
 
     if (!mnemonic) throw new Error('HOT_WALLET_MNEMONIC not configured');
 
-    // Dynamic import — @ton/ton is a large package, only loaded when needed
+    const words = mnemonic.trim().split(/\s+/);
+    if (words.length < 12) throw new Error('HOT_WALLET_MNEMONIC appears invalid — expected 24 words');
+
     const { TonClient, WalletContractV4, internal } = await import('@ton/ton');
     const { mnemonicToPrivateKey }                  = await import('@ton/crypto');
 
@@ -196,53 +198,47 @@ export class WithdrawalService {
       ? 'https://toncenter.com/api/v2/jsonRPC'
       : 'https://testnet.toncenter.com/api/v2/jsonRPC';
 
-    const client = new TonClient({ endpoint, apiKey });
-
-    // Derive keypair from mnemonic
-    const words  = mnemonic.trim().split(/\s+/);
+    const client  = new TonClient({ endpoint, apiKey });
     const keyPair = await mnemonicToPrivateKey(words);
-
-    // Open wallet contract
-    const wallet   = WalletContractV4.create({ publicKey: keyPair.publicKey, workchain: 0 });
+    const wallet  = WalletContractV4.create({ publicKey: keyPair.publicKey, workchain: 0 });
     const contract = client.open(wallet);
-    const seqno    = await contract.getSeqno();
 
-    // Parse destination address
-    const { Address } = await import('@ton/core');
-    const toAddress    = Address.parse(destination);
+    let seqno: number;
+    try {
+      seqno = await contract.getSeqno();
+    } catch (err) {
+      const msg = (err as Error).message;
+      throw new Error(`TON API error getting seqno (network=${network} endpoint=${endpoint}): ${msg}`);
+    }
 
-    // Convert TON amount to nanoTON
-    const { toNano } = await import('@ton/core');
-    const nanoAmount  = toNano(amount);
+    const { Address, toNano } = await import('@ton/core');
+    const toAddress  = Address.parse(destination);
+    const nanoAmount = toNano(amount);
 
-    // Send transfer
-    await contract.sendTransfer({
-      seqno,
-      secretKey: keyPair.secretKey,
-      messages: [
-        internal({
-          to:    toAddress,
-          value: nanoAmount,
-          body:  'CheckTON withdrawal',
-        }),
-      ],
-    });
+    try {
+      await contract.sendTransfer({
+        seqno,
+        secretKey: keyPair.secretKey,
+        messages: [
+          internal({ to: toAddress, value: nanoAmount, body: 'CheckTON withdrawal' }),
+        ],
+      });
+    } catch (err) {
+      const msg = (err as Error).message;
+      throw new Error(`TON transfer failed (network=${network} dest=${destination} amount=${amount}): ${msg}`);
+    }
 
-    // Wait briefly then fetch the actual tx hash from TON Center
+    // Wait then fetch real tx hash
     await new Promise(r => setTimeout(r, 8_000));
     try {
-      const network  = process.env.TON_NETWORK || 'testnet';
-      const base     = network === 'mainnet'
-        ? 'https://toncenter.com/api/v2'
-        : 'https://testnet.toncenter.com/api/v2';
+      const base        = network === 'mainnet' ? 'https://toncenter.com/api/v2' : 'https://testnet.toncenter.com/api/v2';
       const apiKeyParam = apiKey ? `&api_key=${apiKey}` : '';
-      const hotAddr  = wallet.address.toString({ bounceable: false });
-      const res      = await fetch(`${base}/getTransactions?address=${hotAddr}&limit=5${apiKeyParam}`);
-      const data     = await res.json() as { ok: boolean; result: Array<Record<string, unknown>> };
+      const hotAddr     = wallet.address.toString({ bounceable: false });
+      const res  = await fetch(`${base}/getTransactions?address=${hotAddr}&limit=5${apiKeyParam}`);
+      const data = await res.json() as { ok: boolean; result: Array<Record<string, unknown>> };
       if (data.ok && data.result.length) {
-        // Find the tx matching our seqno — it's the most recent outgoing tx
         const txHash = String(
-          (data.result[0].transaction_id as Record<string, unknown>)?.hash ?? data.result[0].hash ?? ''
+          (data.result[0].transaction_id as Record<string, unknown>)?.hash ?? data.result[0].hash ?? '',
         );
         if (txHash) {
           logger.info(`TON transfer confirmed: ${amount} TON → ${destination} hash=${txHash}`);
@@ -253,7 +249,6 @@ export class WithdrawalService {
       logger.warn(`Could not fetch tx hash after send: ${(pollErr as Error).message}`);
     }
 
-    // Fallback identifier if polling fails — still unique and traceable
     const txHash = `sent:${wallet.address.toString({ bounceable: false })}:seq${seqno}:${Date.now()}`;
     logger.info(`TON transfer sent: ${amount} TON → ${destination} seqno=${seqno}`);
     return txHash;
