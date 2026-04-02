@@ -1,7 +1,7 @@
 {
-  "url":         "https://ton-checkers-beta.vercel.app",
-  "name":        "CheckTON",
-  "iconUrl":     "https://ton-checkers-beta.vercel.app/gameicon.png",
-  "termsOfUseUrl": "https://ton-checkers-beta.vercel.app/terms",
-  "privacyPolicyUrl": "https://ton-checkers-beta.vercel.app/privacy"
+  "url":         "https://toncheckersapp.netlify.app",
+  "name":        "TonCheckers",
+  "iconUrl":     "https://toncheckersapp.netlify.app/gameicon.png",
+  "termsOfUseUrl": "https://toncheckersapp.netlify.app/terms",
+  "privacyPolicyUrl": "https://toncheckersapp.netlify.app/privacy"
 }
