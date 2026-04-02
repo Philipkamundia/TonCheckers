@@ -77,12 +77,14 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       <p style={styles.subtitle}>Wager TON. Challenge Opponents. Climb the Ranks.</p>
 
       <div style={styles.card}>
-        <p style={styles.cardText}>Connect your TON wallet to start playing</p>
-        {/* TonConnect UI handles Tonkeeper / Telegram Wallet / WalletConnect */}
-        <TonConnectButton style={{ margin: '0 auto', display: 'block' }} />
+        <p style={styles.cardText}>
+          {wallet ? '✅ Wallet connected' : 'Connect your TON wallet to start playing'}
+        </p>
+        {/* Hide TonConnect button once wallet is connected — MainButton takes over */}
+        {!wallet && <TonConnectButton style={{ margin: '0 auto', display: 'block' }} />}
         {wallet && (
           <p style={styles.connectedText}>
-            ✅ Wallet connected · {wallet.account.address.slice(0, 8)}...
+            {wallet.account.address.slice(0, 8)}...{wallet.account.address.slice(-6)}
           </p>
         )}
       </div>
