@@ -1,9 +1,5 @@
 /**
  * AdminDashboard.tsx — Admin dashboard (PRD §15)
- *
- * Access: only via admin bot URL (?mode=admin)
- * Auth: treasury wallet must be connected and signed
- * Hidden from regular users — route only renders in admin mode
  */
 import { useEffect, useState } from 'react';
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
@@ -11,35 +7,46 @@ import { useTelegram } from '../hooks/useTelegram';
 import { api } from '../services/api';
 
 type AdminTab = 'summary' | 'withdrawals' | 'treasury' | 'users' | 'games' | 'tournaments' | 'fees' | 'crashes';
-const TABS: { id: AdminTab; label: string; emoji: string }[] = [
-  { id: 'summary',     label: 'Overview',    emoji: '📊' },
-  { id: 'withdrawals', label: 'Withdrawals', emoji: '💸' },
-  { id: 'treasury',    label: 'Treasury',    emoji: '🏦' },
-  { id: 'users',       label: 'Users',       emoji: '👥' },
-  { id: 'games',       label: 'Games',       emoji: '♟️' },
-  { id: 'tournaments', label: 'Tournaments', emoji: '🏆' },
-  { id: 'fees',        label: 'Fees',        emoji: '💰' },
-  { id: 'crashes',     label: 'Crashes',     emoji: '🔴' },
+
+const TABS: { id: AdminTab; emoji: string; label: string; sub: string }[] = [
+  { id: 'withdrawals', emoji: '💸', label: 'Withdrawals', sub: 'Pending queue'    },
+  { id: 'treasury',   emoji: '🏦', label: 'Treasury',    sub: 'Fund health'      },
+  { id: 'users',      emoji: '👥', label: 'Users',       sub: 'Manage accounts'  },
+  { id: 'games',      emoji: '♟️', label: 'Games',       sub: 'Game log'         },
+  { id: 'tournaments',emoji: '🏆', label: 'Tournaments', sub: 'Overview'         },
+  { id: 'fees',       emoji: '💰', label: 'Fees',        sub: 'Fee breakdown'    },
+  { id: 'crashes',    emoji: '🔴', label: 'Crashes',     sub: 'Crash log'        },
 ];
+
+const ENDPOINTS: Record<AdminTab, string> = {
+  summary:     '/api/admin/summary',
+  withdrawals: '/api/admin/withdrawals/pending',
+  treasury:    '/api/admin/treasury',
+  users:       '/api/admin/users',
+  games:       '/api/admin/games',
+  tournaments: '/api/admin/tournaments',
+  fees:        '/api/admin/fees',
+  crashes:     '/api/admin/crashes',
+};
 
 export function AdminDashboard() {
   const { haptic } = useTelegram();
   const [tonConnectUI] = useTonConnectUI();
   const wallet = useTonWallet();
-  const [tab,       setTab]       = useState<AdminTab>('summary');
+
   const [authed,    setAuthed]    = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [tab,       setTab]       = useState<AdminTab | null>(null);
+  const [summary,   setSummary]   = useState<Record<string, number> | null>(null);
   const [data,      setData]      = useState<Record<string, unknown> | null>(null);
   const [loading,   setLoading]   = useState(false);
 
   async function handleAdminAuth() {
-    if (!wallet) {
-      setAuthError('Connect your treasury wallet first');
-      return;
-    }
+    if (!wallet) { setAuthError('Connect your treasury wallet first'); return; }
     try {
       api.defaults.headers.common['X-Admin-Wallet'] = wallet.account.address;
-      await api.get('/api/admin/summary');
+      const res = await api.get('/api/admin/summary');
+      setSummary(res.data.summary as Record<string, number>);
       setAuthed(true);
       setAuthError(null);
       haptic.success();
@@ -50,110 +57,138 @@ export function AdminDashboard() {
     }
   }
 
-  // Load data for active tab
   useEffect(() => {
-    if (!authed) return;
+    if (!authed || !tab) return;
     setLoading(true);
     setData(null);
-
-    const endpoints: Record<AdminTab, string> = {
-      summary:     '/api/admin/summary',
-      withdrawals: '/api/admin/withdrawals/pending',
-      treasury:    '/api/admin/treasury',
-      users:       '/api/admin/users',
-      games:       '/api/admin/games',
-      tournaments: '/api/admin/tournaments',
-      fees:        '/api/admin/fees',
-      crashes:     '/api/admin/crashes',
-    };
-
-    api.get(endpoints[tab])
+    api.get(ENDPOINTS[tab])
       .then(r => setData(r.data))
       .catch(() => setData({ error: 'Failed to load' }))
       .finally(() => setLoading(false));
   }, [tab, authed]);
 
+  function openTab(t: AdminTab) {
+    setTab(t);
+    haptic.selection();
+  }
+
+  // ── Auth screen ────────────────────────────────────────────────────────────
   if (!authed) {
     return (
-      <div style={styles.authContainer}>
-        <h2 style={styles.title}>🔐 Admin Dashboard</h2>
-        <p style={styles.hint}>Connect your treasury wallet to authenticate</p>
-        {!wallet ? (
-          <button style={styles.authBtn} onClick={() => tonConnectUI.openModal()}>
-            Connect Treasury Wallet
-          </button>
-        ) : (
-          <button style={styles.authBtn} onClick={handleAdminAuth}>
-            Authenticate with Treasury Wallet
-          </button>
-        )}
-        {authError && <p style={styles.error}>{authError}</p>}
+      <div style={s.authContainer}>
+        <div style={s.authLogo}>🔐</div>
+        <p style={s.authTitle}>Admin Dashboard</p>
+        <p style={s.authHint}>Connect your treasury wallet to continue</p>
+        <div style={s.authCard}>
+          {!wallet ? (
+            <button style={s.primaryBtn} onClick={() => tonConnectUI.openModal()}>
+              Connect Treasury Wallet
+            </button>
+          ) : (
+            <>
+              <p style={s.walletConnected}>✅ {wallet.account.address.slice(0,8)}…{wallet.account.address.slice(-6)}</p>
+              <button style={s.primaryBtn} onClick={handleAdminAuth}>
+                Authenticate
+              </button>
+            </>
+          )}
+          {authError && <p style={s.error}>{authError}</p>}
+        </div>
       </div>
     );
   }
 
-  return (
-    <div style={styles.container}>
-      <h2 style={styles.title}>Admin Dashboard</h2>
+  // ── Tab detail view ────────────────────────────────────────────────────────
+  if (tab) {
+    return (
+      <div style={s.container}>
+        <div style={s.topBar}>
+          <button style={s.backBtn} onClick={() => { setTab(null); setData(null); }}>‹ Back</button>
+          <p style={s.topTitle}>{TABS.find(t2 => t2.id === tab)?.emoji} {TABS.find(t2 => t2.id === tab)?.label}</p>
+          <button style={s.refreshBtn} onClick={() => openTab(tab)}>↻</button>
+        </div>
+        <div style={s.content}>
+          {loading && <p style={s.hint}>Loading…</p>}
+          {!loading && data && <TabContent tab={tab} data={data} onRefresh={() => openTab(tab)} />}
+        </div>
+      </div>
+    );
+  }
 
-      {/* Tab bar */}
-      <div style={styles.tabBar}>
-        {TABS.map(t => (
-          <button key={t.id}
-            style={{ ...styles.tabBtn, ...(tab === t.id ? styles.tabBtnActive : {}) }}
-            onClick={() => { setTab(t.id); haptic.selection(); }}
-          >
-            <span>{t.emoji}</span>
-            <span style={styles.tabLabel}>{t.label}</span>
-          </button>
-        ))}
+  // ── Home / summary view ────────────────────────────────────────────────────
+  return (
+    <div style={s.container}>
+      {/* Top bar */}
+      <div style={s.topBar}>
+        <p style={s.greeting}>Admin Panel 🛡️</p>
+        <div style={s.badge}>Treasury</div>
       </div>
 
-      {/* Content */}
-      <div style={styles.content}>
-        {loading && <p style={styles.hint}>Loading…</p>}
-        {!loading && data && <AdminTabContent tab={tab} data={data} onRefresh={() => setTab(tab)} />}
+      {/* Summary card */}
+      {summary && (
+        <div style={s.summaryCard}>
+          <p style={s.sectionLabel}>Overview</p>
+          <div style={s.statsGrid}>
+            <Stat label="Users"       value={summary.total_users}          />
+            <Stat label="New Today"   value={summary.new_users_today}       />
+            <Stat label="Active Games"value={summary.active_games}          />
+            <Stat label="Queue"       value={summary.queue_size}            />
+            <Stat label="Tournaments" value={summary.open_tournaments}      />
+            <Stat label="Withdrawals" value={summary.pending_withdrawals}
+                  highlight={summary.pending_withdrawals > 0}               />
+          </div>
+        </div>
+      )}
+
+      {/* Section grid */}
+      <div style={s.grid}>
+        {TABS.map((t, i) => (
+          <button
+            key={t.id}
+            style={{ ...s.card, ...(i === 0 ? s.cardPrimary : {}) }}
+            onClick={() => openTab(t.id)}
+          >
+            <span style={s.cardEmoji}>{t.emoji}</span>
+            <span style={s.cardTitle}>{t.label}</span>
+            <span style={s.cardSub}>{t.sub}</span>
+          </button>
+        ))}
       </div>
     </div>
   );
 }
 
-function AdminTabContent({ tab, data, onRefresh }: { tab: AdminTab; data: Record<string, unknown>; onRefresh: () => void }) {
-  const d = data;
+// ── Tab content ──────────────────────────────────────────────────────────────
+function TabContent({ tab, data, onRefresh }: { tab: AdminTab; data: Record<string, unknown>; onRefresh: () => void }) {
 
-  if (tab === 'summary' && d.summary) {
-    const s = d.summary as Record<string, number>;
+  if (tab === 'treasury' && data.treasury) {
+    const t = data.treasury as Record<string, string | null>;
     return (
-      <div style={styles.grid}>
-        <StatCard label="Total Users"       value={s.total_users} />
-        <StatCard label="New Today"         value={s.new_users_today} />
-        <StatCard label="Active Games"      value={s.active_games} />
-        <StatCard label="Queue Size"        value={s.queue_size} />
-        <StatCard label="Open Tournaments"  value={s.open_tournaments} />
-        <StatCard label="Pending Withdrawals" value={s.pending_withdrawals} highlight={s.pending_withdrawals > 0} />
+      <div style={s.grid}>
+        <StatCard label="Obligations"    value={`${fmt(t.totalObligations)} TON`}   />
+        <StatCard label="Available"      value={`${fmt(t.totalAvailable)} TON`}      />
+        <StatCard label="Locked"         value={`${fmt(t.totalLocked)} TON`}         />
+        <StatCard label="Platform Fees"  value={`${fmt(t.platformFeesEarned)} TON`}  />
       </div>
     );
   }
 
   if (tab === 'withdrawals') {
-    const ws = (d.withdrawals ?? []) as Array<Record<string, string>>;
-    if (!ws.length) return <p style={styles.hint}>No pending withdrawals ✅</p>;
+    const ws = (data.withdrawals ?? []) as Array<Record<string, string>>;
+    if (!ws.length) return <EmptyState icon="✅" text="No pending withdrawals" />;
     return (
       <div>
         {ws.map(w => (
-          <div key={w.id} style={styles.card}>
-            <p style={styles.cardTitle}>{w.username} — {parseFloat(w.amount).toFixed(2)} TON</p>
-            <p style={styles.cardSub}>{w.destination}</p>
-            <p style={styles.cardSub}>{new Date(w.created_at).toLocaleString()}</p>
-            <div style={styles.btnRow}>
-              <button style={styles.approveBtn} onClick={async () => {
-                await api.post(`/api/admin/withdrawals/${w.id}/approve`);
-                onRefresh();
-              }}>Approve</button>
-              <button style={styles.rejectBtn} onClick={async () => {
-                await api.post(`/api/admin/withdrawals/${w.id}/reject`, { reason: 'Rejected by admin' });
-                onRefresh();
-              }}>Reject</button>
+          <div key={w.id} style={s.itemCard}>
+            <div style={s.itemRow}>
+              <span style={s.itemTitle}>{w.username}</span>
+              <span style={s.itemAmount}>{parseFloat(w.amount).toFixed(2)} TON</span>
+            </div>
+            <p style={s.itemSub}>{w.destination}</p>
+            <p style={s.itemSub}>{new Date(w.created_at).toLocaleString()}</p>
+            <div style={s.btnRow}>
+              <button style={s.approveBtn} onClick={async () => { await api.post(`/api/admin/withdrawals/${w.id}/approve`); onRefresh(); }}>✅ Approve</button>
+              <button style={s.rejectBtn}  onClick={async () => { await api.post(`/api/admin/withdrawals/${w.id}/reject`, { reason: 'Rejected by admin' }); onRefresh(); }}>❌ Reject</button>
             </div>
           </div>
         ))}
@@ -161,55 +196,186 @@ function AdminTabContent({ tab, data, onRefresh }: { tab: AdminTab; data: Record
     );
   }
 
-  if (tab === 'treasury' && d.treasury) {
-    const t = d.treasury as Record<string, string | null>;
+  if (tab === 'users') {
+    const users = (data.users ?? []) as Array<Record<string, string | number>>;
+    if (!users.length) return <EmptyState icon="👥" text="No users found" />;
     return (
-      <div style={styles.grid}>
-        <StatCard label="Total Obligations" value={`${parseFloat(String(t.totalObligations ?? 0)).toFixed(2)} TON`} />
-        <StatCard label="Available Balances" value={`${parseFloat(String(t.totalAvailable ?? 0)).toFixed(2)} TON`} />
-        <StatCard label="Locked in Games"   value={`${parseFloat(String(t.totalLocked ?? 0)).toFixed(2)} TON`} />
-        <StatCard label="Platform Fees"     value={`${parseFloat(String(t.platformFeesEarned ?? 0)).toFixed(2)} TON`} />
+      <div>
+        {users.map((u) => (
+          <div key={u.id as string} style={s.itemCard}>
+            <div style={s.itemRow}>
+              <span style={s.itemTitle}>{u.username as string}</span>
+              <span style={s.itemBadge}>ELO {u.elo}</span>
+            </div>
+            <p style={s.itemSub}>{(u.walletAddress as string)?.slice(0,12)}…</p>
+            <p style={s.itemSub}>Games: {u.gamesPlayed} · Won: {u.gamesWon}</p>
+          </div>
+        ))}
       </div>
     );
   }
 
-  // Generic JSON display for other tabs
-  return (
-    <pre style={styles.json}>{JSON.stringify(data, null, 2)}</pre>
-  );
+  if (tab === 'games') {
+    const games = (data.games ?? []) as Array<Record<string, string>>;
+    if (!games.length) return <EmptyState icon="♟️" text="No games found" />;
+    return (
+      <div>
+        {games.map(g => (
+          <div key={g.id} style={s.itemCard}>
+            <div style={s.itemRow}>
+              <span style={s.itemTitle}>{g.mode?.toUpperCase()} · {g.status}</span>
+              <span style={s.itemBadge}>{parseFloat(g.stake ?? '0').toFixed(2)} TON</span>
+            </div>
+            <p style={s.itemSub}>{new Date(g.created_at).toLocaleString()}</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (tab === 'tournaments') {
+    const ts = (data.tournaments ?? []) as Array<Record<string, string | number>>;
+    if (!ts.length) return <EmptyState icon="🏆" text="No tournaments found" />;
+    return (
+      <div>
+        {ts.map(t => (
+          <div key={t.id as string} style={s.itemCard}>
+            <div style={s.itemRow}>
+              <span style={s.itemTitle}>{t.name as string}</span>
+              <span style={s.itemBadge}>{t.status as string}</span>
+            </div>
+            <p style={s.itemSub}>Players: {t.participant_count} · Prize: {parseFloat(String(t.prize_pool ?? 0)).toFixed(2)} TON</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (tab === 'fees') {
+    const fees = data.fees as Record<string, string | number> | null;
+    if (!fees) return <EmptyState icon="💰" text="No fee data" />;
+    return (
+      <div style={s.grid}>
+        <StatCard label="Total Collected" value={`${fmt(String(fees.totalFees))} TON`} />
+        <StatCard label="This Month"      value={`${fmt(String(fees.thisMonth))} TON`} />
+        <StatCard label="This Week"       value={`${fmt(String(fees.thisWeek))} TON`}  />
+        <StatCard label="Today"           value={`${fmt(String(fees.today))} TON`}     />
+      </div>
+    );
+  }
+
+  if (tab === 'crashes') {
+    const crashes = (data.crashes ?? []) as Array<Record<string, string>>;
+    if (!crashes.length) return <EmptyState icon="✅" text="No crashes recorded" />;
+    return (
+      <div>
+        {crashes.map(c => (
+          <div key={c.id} style={{ ...s.itemCard, borderLeft: '3px solid #E53935' }}>
+            <div style={s.itemRow}>
+              <span style={s.itemTitle}>Game {c.game_id?.slice(0,8)}…</span>
+              <span style={{ ...s.itemBadge, background: 'rgba(229,57,53,0.15)', color: '#E53935' }}>{parseFloat(c.stake ?? '0').toFixed(2)} TON</span>
+            </div>
+            <p style={s.itemSub}>{new Date(c.created_at).toLocaleString()}</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <pre style={s.json}>{JSON.stringify(data, null, 2)}</pre>;
 }
 
 function StatCard({ label, value, highlight }: { label: string; value: string | number; highlight?: boolean }) {
   return (
-    <div style={{ ...styles.statCard, ...(highlight ? styles.statCardHighlight : {}) }}>
-      <p style={styles.statLabel}>{label}</p>
-      <p style={styles.statValue}>{value}</p>
+    <div style={{ ...s.statCard, ...(highlight ? s.statHighlight : {}) }}>
+      <p style={s.statLabel}>{label}</p>
+      <p style={s.statValue}>{value}</p>
     </div>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  container:       { padding:'16px', background:'var(--tg-theme-bg-color)', minHeight:'100vh' },
-  authContainer:   { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100vh', padding:24, gap:16, background:'var(--tg-theme-bg-color)' },
-  title:           { color:'var(--tg-theme-text-color)', fontSize:20, fontWeight:700, margin:'0 0 12px' },
-  hint:            { color:'var(--tg-theme-hint-color)', fontSize:14, textAlign:'center' },
-  authBtn:         { background:'#2AABEE', border:'none', borderRadius:14, padding:'16px 32px', color:'#fff', fontSize:16, fontWeight:600, cursor:'pointer', width:'100%', maxWidth:320 },
-  error:           { color:'var(--tg-theme-destructive-text-color)', fontSize:13 },
-  tabBar:          { display:'flex', overflowX:'auto', gap:6, marginBottom:16, paddingBottom:4 },
-  tabBtn:          { flex:'none', background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:10, padding:'8px 10px', display:'flex', flexDirection:'column', alignItems:'center', gap:2, cursor:'pointer', minWidth:64 },
-  tabBtnActive:    { background:'#2AABEE' },
-  tabLabel:        { color:'var(--tg-theme-text-color)', fontSize:10 },
-  content:         { paddingBottom:40 },
-  grid:            { display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 },
-  statCard:        { background:'var(--tg-theme-secondary-bg-color)', borderRadius:12, padding:'14px 12px' },
-  statCardHighlight:{ background:'#FFF3E0', borderColor:'#FF8F00', border:'1px solid' },
-  statLabel:       { color:'var(--tg-theme-hint-color)', fontSize:12, margin:'0 0 4px' },
-  statValue:       { color:'var(--tg-theme-text-color)', fontWeight:700, fontSize:18, margin:0 },
-  card:            { background:'var(--tg-theme-secondary-bg-color)', borderRadius:12, padding:14, marginBottom:10 },
-  cardTitle:       { color:'var(--tg-theme-text-color)', fontWeight:600, margin:'0 0 4px' },
-  cardSub:         { color:'var(--tg-theme-hint-color)', fontSize:12, margin:'2px 0' },
-  btnRow:          { display:'flex', gap:8, marginTop:10 },
-  approveBtn:      { flex:1, background:'#4CAF50', border:'none', borderRadius:10, padding:'10px', color:'#fff', fontSize:14, fontWeight:600, cursor:'pointer' },
-  rejectBtn:       { flex:1, background:'var(--tg-theme-destructive-text-color)', border:'none', borderRadius:10, padding:'10px', color:'#fff', fontSize:14, fontWeight:600, cursor:'pointer' },
-  json:            { background:'var(--tg-theme-secondary-bg-color)', borderRadius:12, padding:12, fontSize:11, color:'var(--tg-theme-text-color)', overflowX:'auto', whiteSpace:'pre-wrap' },
+function Stat({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
+  return (
+    <div style={s.statItem}>
+      <p style={{ ...s.statItemValue, ...(highlight ? { color: '#FF8F00' } : {}) }}>{value ?? 0}</p>
+      <p style={s.statItemLabel}>{label}</p>
+    </div>
+  );
+}
+
+function EmptyState({ icon, text }: { icon: string; text: string }) {
+  return (
+    <div style={s.empty}>
+      <span style={s.emptyIcon}>{icon}</span>
+      <p style={s.emptyText}>{text}</p>
+    </div>
+  );
+}
+
+function fmt(v: string | null | undefined): string {
+  return parseFloat(String(v ?? 0)).toFixed(2);
+}
+
+const s: Record<string, React.CSSProperties> = {
+  // layout
+  container:      { padding:'16px', background:'var(--tg-theme-bg-color)', minHeight:'100vh' },
+  authContainer:  { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', minHeight:'100vh', padding:24, gap:12, background:'var(--tg-theme-bg-color)' },
+  content:        { paddingBottom:40 },
+
+  // auth
+  authLogo:       { fontSize:56 },
+  authTitle:      { color:'var(--tg-theme-text-color)', fontSize:24, fontWeight:700, margin:0 },
+  authHint:       { color:'var(--tg-theme-hint-color)', fontSize:14, textAlign:'center', margin:0 },
+  authCard:       { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:20, width:'100%', maxWidth:320, display:'flex', flexDirection:'column', gap:12 },
+  walletConnected:{ color:'#4CAF50', fontSize:13, textAlign:'center', margin:0 },
+  primaryBtn:     { background:'#2AABEE', border:'none', borderRadius:12, padding:'14px', color:'#fff', fontSize:16, fontWeight:600, cursor:'pointer', width:'100%' },
+  error:          { color:'var(--tg-theme-destructive-text-color)', fontSize:13, textAlign:'center', margin:0 },
+
+  // top bar
+  topBar:         { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 },
+  greeting:       { color:'var(--tg-theme-hint-color)', fontSize:13, margin:0 },
+  badge:          { background:'rgba(42,171,238,0.15)', color:'#2AABEE', fontSize:11, fontWeight:600, padding:'4px 10px', borderRadius:20 },
+  topTitle:       { color:'var(--tg-theme-text-color)', fontSize:16, fontWeight:700, margin:0 },
+  backBtn:        { background:'none', border:'none', color:'#2AABEE', fontSize:16, fontWeight:600, cursor:'pointer', padding:0 },
+  refreshBtn:     { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:8, width:32, height:32, fontSize:16, cursor:'pointer', color:'var(--tg-theme-text-color)' },
+
+  // summary card
+  summaryCard:    { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:16, marginBottom:16 },
+  sectionLabel:   { color:'var(--tg-theme-hint-color)', fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:0.5, margin:'0 0 12px' },
+  statsGrid:      { display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 },
+  statItem:       { textAlign:'center' },
+  statItemValue:  { color:'var(--tg-theme-text-color)', fontSize:20, fontWeight:700, margin:0 },
+  statItemLabel:  { color:'var(--tg-theme-hint-color)', fontSize:11, margin:'2px 0 0' },
+
+  // nav grid
+  grid:           { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 },
+  card:           { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:16, padding:'18px 12px', display:'flex', flexDirection:'column', alignItems:'center', gap:4, cursor:'pointer', textAlign:'center' },
+  cardPrimary:    { background:'#2AABEE', gridColumn:'1 / -1' },
+  cardEmoji:      { fontSize:28 },
+  cardTitle:      { color:'var(--tg-theme-text-color)', fontWeight:600, fontSize:15, margin:0 },
+  cardSub:        { color:'var(--tg-theme-hint-color)', fontSize:12, margin:0 },
+
+  // stat cards (treasury / fees)
+  statCard:       { background:'var(--tg-theme-secondary-bg-color)', borderRadius:12, padding:'14px 12px' },
+  statHighlight:  { background:'rgba(255,143,0,0.1)', border:'1px solid #FF8F00' },
+  statLabel:      { color:'var(--tg-theme-hint-color)', fontSize:12, margin:'0 0 4px' },
+  statValue:      { color:'var(--tg-theme-text-color)', fontWeight:700, fontSize:18, margin:0 },
+
+  // list item cards
+  itemCard:       { background:'var(--tg-theme-secondary-bg-color)', borderRadius:12, padding:14, marginBottom:10 },
+  itemRow:        { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 },
+  itemTitle:      { color:'var(--tg-theme-text-color)', fontWeight:600, fontSize:14 },
+  itemAmount:     { color:'#4CAF50', fontWeight:700, fontSize:14 },
+  itemBadge:      { background:'rgba(42,171,238,0.15)', color:'#2AABEE', fontSize:11, fontWeight:600, padding:'3px 8px', borderRadius:20 },
+  itemSub:        { color:'var(--tg-theme-hint-color)', fontSize:12, margin:'2px 0' },
+  btnRow:         { display:'flex', gap:8, marginTop:10 },
+  approveBtn:     { flex:1, background:'rgba(76,175,80,0.15)', border:'1px solid #4CAF50', borderRadius:10, padding:'10px', color:'#4CAF50', fontSize:13, fontWeight:600, cursor:'pointer' },
+  rejectBtn:      { flex:1, background:'rgba(229,57,53,0.1)', border:'1px solid #E53935', borderRadius:10, padding:'10px', color:'#E53935', fontSize:13, fontWeight:600, cursor:'pointer' },
+
+  // misc
+  hint:           { color:'var(--tg-theme-hint-color)', fontSize:14, textAlign:'center' },
+  empty:          { display:'flex', flexDirection:'column', alignItems:'center', gap:8, padding:'40px 0' },
+  emptyIcon:      { fontSize:40 },
+  emptyText:      { color:'var(--tg-theme-hint-color)', fontSize:14, margin:0 },
+  json:           { background:'var(--tg-theme-secondary-bg-color)', borderRadius:12, padding:12, fontSize:11, color:'var(--tg-theme-text-color)', overflowX:'auto', whiteSpace:'pre-wrap' },
 };
