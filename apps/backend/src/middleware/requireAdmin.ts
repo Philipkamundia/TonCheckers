@@ -20,7 +20,7 @@ import { logger } from '../utils/logger.js';
 
 const TREASURY_WALLET = process.env.TREASURY_WALLET_ADDRESS?.toLowerCase();
 
-export function requireAdmin(req: Request, _res: Response, next: NextFunction): void {
+export async function requireAdmin(req: Request, _res: Response, next: NextFunction): Promise<void> {
   if (!TREASURY_WALLET) {
     logger.error('TREASURY_WALLET_ADDRESS not configured — admin access blocked');
     return next(new AppError(503, 'Admin access not configured', 'ADMIN_NOT_CONFIGURED'));

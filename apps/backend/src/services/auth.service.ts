@@ -1,6 +1,5 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { sign, verify as ed25519Verify } from '@ton/crypto';
 import { Address } from '@ton/core';
 import pool from '../config/db.js';
 import { generateUniqueUsername } from '../utils/usernameGenerator.js';
@@ -155,6 +154,7 @@ export class AuthService {
       }
       const pubKey = stateInitBuf.slice(-32);
 
+      const { verify: ed25519Verify } = await import('@ton/crypto');
       const valid = await ed25519Verify(finalHash, sigBuf, pubKey);
       if (!valid) {
         logger.warn(`TonConnect signature invalid for ${walletAddress}`);

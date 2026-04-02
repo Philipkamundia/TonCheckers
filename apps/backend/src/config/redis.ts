@@ -7,7 +7,7 @@ export const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379'
   enableReadyCheck: true,
 });
 
-redis.on('error', (err) => {
+redis.on('error', (err: Error) => {
   logger.error(`Redis connection error: ${err.message}`);
 });
 
