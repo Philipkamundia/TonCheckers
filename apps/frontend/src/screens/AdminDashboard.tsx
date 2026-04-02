@@ -6,9 +6,9 @@
  * Hidden from regular users — route only renders in admin mode
  */
 import { useEffect, useState } from 'react';
+import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
 import { useTelegram } from '../hooks/useTelegram';
 import { api } from '../services/api';
-import { tonConnectUI } from '../services/tonConnect';
 
 type AdminTab = 'summary' | 'withdrawals' | 'treasury' | 'users' | 'games' | 'tournaments' | 'fees' | 'crashes';
 const TABS: { id: AdminTab; label: string; emoji: string }[] = [
@@ -24,15 +24,15 @@ const TABS: { id: AdminTab; label: string; emoji: string }[] = [
 
 export function AdminDashboard() {
   const { haptic } = useTelegram();
-  const [tab,           setTab]           = useState<AdminTab>('summary');
-  const [authed,        setAuthed]        = useState(false);
-  const [authError,     setAuthError]     = useState<string | null>(null);
-  const [data,          setData]          = useState<Record<string, unknown> | null>(null);
-  const [loading,       setLoading]       = useState(false);
+  const [tonConnectUI] = useTonConnectUI();
+  const wallet = useTonWallet();
+  const [tab,       setTab]       = useState<AdminTab>('summary');
+  const [authed,    setAuthed]    = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [data,      setData]      = useState<Record<string, unknown> | null>(null);
+  const [loading,   setLoading]   = useState(false);
 
-  // Auth: connect treasury wallet and sign challenge
   async function handleAdminAuth() {
-    const wallet = tonConnectUI.wallet;
     if (!wallet) {
       setAuthError('Connect your treasury wallet first');
       return;
@@ -42,27 +42,24 @@ export function AdminDashboard() {
       const challengeRes = await api.get('/api/admin/challenge');
       const challenge    = challengeRes.data.challenge;
 
-      // Sign the challenge with the wallet via TonConnect
-      // The signature is sent as X-Admin-Signature for server-side Ed25519 verification
-      let signature: string;
-      let stateInit: string;
-      try {
-        await tonConnectUI.sendTransaction({
-          validUntil: Math.floor(Date.now() / 1000) + 300,
-          messages: [],
-        } as Parameters<typeof tonConnectUI.sendTransaction>[0]);
-        const proof = tonConnectUI.wallet?.connectItems?.tonProof;
-        if (!proof || !('proof' in proof)) throw new Error('No proof available');
-        signature = proof.proof.signature;
-        stateInit = (proof.proof as { signature: string; stateInit?: string }).stateInit ?? '';
-      } catch {
-        setAuthError('Wallet signing failed — reconnect your treasury wallet');
+      // Use the tonProof from the existing wallet connection
+      const proof = wallet.connectItems?.tonProof;
+      if (!proof || !('proof' in proof)) {
+        // No proof on current connection — need to reconnect with proof request
+        tonConnectUI.setConnectRequestParameters({
+          state: 'ready',
+          value: { tonProof: challenge },
+        });
+        setAuthError('Please disconnect and reconnect your treasury wallet to sign the challenge');
         return;
       }
 
-      api.defaults.headers.common['X-Admin-Wallet']    = wallet.account.address;
-      api.defaults.headers.common['X-Admin-Challenge'] = challenge;
-      api.defaults.headers.common['X-Admin-Signature'] = signature;
+      const signature = proof.proof.signature;
+      const stateInit = (proof.proof as { signature: string; stateInit?: string }).stateInit ?? '';
+
+      api.defaults.headers.common['X-Admin-Wallet']     = wallet.account.address;
+      api.defaults.headers.common['X-Admin-Challenge']  = challenge;
+      api.defaults.headers.common['X-Admin-Signature']  = signature;
       api.defaults.headers.common['X-Admin-State-Init'] = stateInit;
 
       await api.get('/api/admin/summary');
@@ -102,9 +99,18 @@ export function AdminDashboard() {
       <div style={styles.authContainer}>
         <h2 style={styles.title}>🔐 Admin Dashboard</h2>
         <p style={styles.hint}>Connect your treasury wallet to authenticate</p>
-        <button style={styles.authBtn} onClick={handleAdminAuth}>
-          Authenticate with Treasury Wallet
-        </button>
+        {!wallet ? (
+          <button style={styles.authBtn} onClick={() => {
+            tonConnectUI.setConnectRequestParameters({ state: 'ready', value: { tonProof: `admin-${Date.now()}` } });
+            tonConnectUI.openModal();
+          }}>
+            Connect Treasury Wallet
+          </button>
+        ) : (
+          <button style={styles.authBtn} onClick={handleAdminAuth}>
+            Authenticate with Treasury Wallet
+          </button>
+        )}
         {authError && <p style={styles.error}>{authError}</p>}
       </div>
     );

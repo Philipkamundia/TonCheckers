@@ -15,6 +15,7 @@ import { TournamentCreate }  from './screens/TournamentCreate';
 import { Leaderboard }       from './screens/Leaderboard';
 import { Deposit }           from './screens/Deposit';
 import { Withdraw }          from './screens/Withdraw';
+import { Profile }           from './screens/Profile';
 import { AdminDashboard }    from './screens/AdminDashboard';
 
 const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://toncheckersapp.netlify.app'}/tonconnect-manifest.json`;
@@ -55,6 +56,7 @@ function AppRoutes() {
       <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
       <Route path="/deposit"     element={<ProtectedRoute><Deposit /></ProtectedRoute>} />
       <Route path="/withdraw"    element={<ProtectedRoute><Withdraw /></ProtectedRoute>} />
+      <Route path="/profile"     element={<ProtectedRoute><Profile /></ProtectedRoute>} />
 
       {/* Admin — only accessible via bot link with ?mode=admin */}
       <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />

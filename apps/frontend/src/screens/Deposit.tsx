@@ -61,3 +61,4 @@ const styles: Record<string, React.CSSProperties> = {
   warning:   { color:'#FF8F00', fontSize:13, margin:'12px 0' },
   copyBtn:   { background:'var(--tg-theme-bg-color)', border:'none', borderRadius:10, padding:'10px 20px', color:'#2AABEE', fontSize:14, cursor:'pointer' },
 };
+

@@ -25,6 +25,7 @@ export function AiSelect() {
 
   const [selected, setSelected] = useState<Difficulty>('intermediate');
   const [starting, setStarting] = useState(false);
+  const [wsError,  setWsError]  = useState(false);
 
   useEffect(() => { return showBackButton(() => navigate('/')); }, []);
 
@@ -37,13 +38,26 @@ export function AiSelect() {
       setActiveGame(gameId, 1);
       navigate(`/ai-game/${gameId}`);
     });
-    return unsub;
+    const unsubErr = on<{ message: string }>('error', () => {
+      setStarting(false);
+      setWsError(true);
+    });
+    return () => { unsub(); unsubErr(); };
   }, [on]);
 
   function handleStart() {
+    setWsError(false);
     setStarting(true);
     haptic.impact('medium');
     emit('ai.start', { difficulty: selected });
+
+    // If no response in 8s, surface an error
+    setTimeout(() => {
+      setStarting(prev => {
+        if (prev) setWsError(true);
+        return false;
+      });
+    }, 8_000);
   }
 
   return (
@@ -68,6 +82,7 @@ export function AiSelect() {
       </div>
 
       {starting && <p style={styles.hint}>Starting game…</p>}
+      {wsError  && <p style={styles.error}>Connection failed. Check your connection and try again.</p>}
     </div>
   );
 }
@@ -83,4 +98,5 @@ const styles: Record<string, React.CSSProperties> = {
   label:     { color: 'var(--tg-theme-text-color)', fontWeight: 600, fontSize: 16, margin: 0 },
   desc:      { color: 'var(--tg-theme-hint-color)', fontSize: 13, margin: '2px 0 0' },
   hint:      { color: 'var(--tg-theme-hint-color)', fontSize: 13, textAlign: 'center', marginTop: 16 },
+  error:     { color: 'var(--tg-theme-destructive-text-color, #ff3b30)', fontSize: 13, textAlign: 'center', marginTop: 16 },
 };

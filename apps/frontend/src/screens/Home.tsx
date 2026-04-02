@@ -21,9 +21,14 @@ export function Home() {
 
   return (
     <div style={styles.container}>
+      {/* Header with profile button */}
+      <div style={styles.topBar}>
+        <p style={styles.greeting}>Hey, {user?.username ?? 'Player'} 👋</p>
+        <button style={styles.profileBtn} onClick={() => navigate('/profile')}>👤</button>
+      </div>
+
       {/* Balance Card */}
       <div style={styles.balanceCard}>
-        <p style={styles.greeting}>Hey, {user?.username ?? 'Player'} 👋</p>
         <div style={styles.balanceRow}>
           <span style={styles.balanceLabel}>Balance</span>
           <span style={styles.balanceValue}>{parseFloat(balance?.available ?? '0').toFixed(2)} TON</span>
@@ -68,8 +73,10 @@ function ModeCard({ emoji, title, subtitle, onClick, primary }: {
 
 const styles: Record<string, React.CSSProperties> = {
   container:    { padding:'16px', background:'var(--tg-theme-bg-color)', minHeight:'100vh' },
+  topBar:       { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 },
+  greeting:     { color:'var(--tg-theme-hint-color)', fontSize:13, margin:0 },
+  profileBtn:   { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:'50%', width:36, height:36, fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
   balanceCard:  { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:20, marginBottom:20 },
-  greeting:     { color:'var(--tg-theme-hint-color)', fontSize:13, margin:'0 0 8px' },
   balanceRow:   { display:'flex', justifyContent:'space-between', alignItems:'center' },
   balanceLabel: { color:'var(--tg-theme-hint-color)', fontSize:14 },
   balanceValue: { color:'var(--tg-theme-text-color)', fontSize:28, fontWeight:700 },

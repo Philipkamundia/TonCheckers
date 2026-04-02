@@ -2,10 +2,15 @@ import { create } from 'zustand';
 import { authApi, balanceApi } from '../services/api';
 
 interface User {
-  id:          string;
-  username:    string;
-  elo:         number;
+  id:            string;
+  username:      string;
+  elo:           number;
   walletAddress: string;
+  gamesPlayed:   number;
+  gamesWon:      number;
+  gamesLost:     number;
+  gamesDrawn:    number;
+  totalWon:      string;
 }
 
 interface Balance {
