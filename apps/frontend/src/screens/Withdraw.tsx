@@ -16,11 +16,19 @@ export function Withdraw() {
   const wallet = useTonWallet();
   const navigate = useNavigate();
 
-  const [amount,  setAmount]  = useState('');
-  const [result,  setResult]  = useState<{ success: boolean; message: string } | null>(null);
-  const walletAddress         = wallet?.account?.address ?? null;
-  const available             = parseFloat(balance?.available ?? '0');
-  const MIN_WITHDRAW          = 0.1;
+  const [amount,    setAmount]    = useState('');
+  const [result,    setResult]    = useState<{ success: boolean; message: string } | null>(null);
+  const [countdown, setCountdown] = useState(0); // seconds remaining on cooldown
+  const walletAddress             = wallet?.account?.address ?? null;
+  const available                 = parseFloat(balance?.available ?? '0');
+  const MIN_WITHDRAW              = 0.1;
+
+  // Tick countdown down every second
+  useEffect(() => {
+    if (countdown <= 0) return;
+    const t = setInterval(() => setCountdown(c => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [countdown]);
 
   useEffect(() => { return showBackButton(() => navigate('/')); }, []);
 
@@ -38,6 +46,7 @@ export function Withdraw() {
       balanceApi.get().then(r => setBalance(r.data.balance));
       const msg = res.data?.message ?? `Withdrawal of ${amount} TON submitted. Funds arriving shortly.`;
       setResult({ success: true, message: msg });
+      setCountdown(30 * 60); // 30 min cooldown starts now
       haptic.success();
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Withdrawal failed';
@@ -46,6 +55,30 @@ export function Withdraw() {
     } finally {
       setMainButtonLoading(false);
     }
+  }
+
+  if (result?.success) {
+    const mins = Math.floor(countdown / 60);
+    const secs = countdown % 60;
+    const cooldownLabel = countdown > 0
+      ? `${mins}:${String(secs).padStart(2, '0')} remaining`
+      : 'Available now';
+    return (
+      <div style={styles.container}>
+        <div style={styles.successBox}>
+          <p style={styles.successIcon}>✅</p>
+          <p style={styles.successTitle}>Withdrawal Submitted</p>
+          <p style={styles.successDesc}>{result.message}</p>
+          <div style={styles.successDetail}>
+            <Row label="Amount"           value={`${amount} TON`} />
+            <Row label="Destination"      value={`${walletAddress?.slice(0,10)}…${walletAddress?.slice(-6)}`} />
+            <Row label="Next withdrawal"  value={cooldownLabel} />
+          </div>
+          <button style={styles.btn} onClick={() => navigate('/')}>Back to Home</button>
+          <button style={styles.outlineBtn} onClick={() => { setResult(null); setAmount(''); }}>Withdraw More</button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -86,11 +119,20 @@ export function Withdraw() {
         <p style={styles.limitText}>30-minute cooldown between withdrawals</p>
       </div>
 
-      {result && (
-        <div style={{ ...styles.result, background: result.success ? '#E8F5E9' : '#FFEBEE' }}>
-          <p style={{ color: result.success ? '#2E7D32' : '#C62828', margin: 0 }}>{result.message}</p>
+      {result && !result.success && (
+        <div style={{ ...styles.result, background: '#FFEBEE' }}>
+          <p style={{ color: '#C62828', margin: 0 }}>{result.message}</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display:'flex', justifyContent:'space-between', padding:'7px 0', borderBottom:'1px solid rgba(128,128,128,0.1)' }}>
+      <span style={{ color:'var(--tg-theme-hint-color)', fontSize:13 }}>{label}</span>
+      <span style={{ color:'var(--tg-theme-text-color)', fontSize:13, fontWeight:500 }}>{value}</span>
     </div>
   );
 }
@@ -111,4 +153,11 @@ const styles: Record<string, React.CSSProperties> = {
   limits:          { marginBottom:16 },
   limitText:       { color:'var(--tg-theme-hint-color)', fontSize:12, margin:'2px 0' },
   result:          { borderRadius:12, padding:14 },
+  successBox:      { display:'flex', flexDirection:'column', alignItems:'center', padding:'40px 16px', gap:12 },
+  successIcon:     { fontSize:56, margin:0 },
+  successTitle:    { color:'var(--tg-theme-text-color)', fontSize:22, fontWeight:700, margin:0 },
+  successDesc:     { color:'var(--tg-theme-hint-color)', fontSize:14, textAlign:'center', lineHeight:1.6, margin:0 },
+  successDetail:   { background:'var(--tg-theme-secondary-bg-color)', borderRadius:14, padding:'4px 14px', width:'100%', maxWidth:360 },
+  btn:             { width:'100%', maxWidth:360, background:'#2AABEE', border:'none', borderRadius:14, padding:'16px', color:'#fff', fontSize:16, fontWeight:600, cursor:'pointer' },
+  outlineBtn:      { width:'100%', maxWidth:360, background:'none', border:'1.5px solid #2AABEE', borderRadius:14, padding:'14px', color:'#2AABEE', fontSize:15, fontWeight:600, cursor:'pointer' },
 };

@@ -112,17 +112,17 @@ export class WithdrawalService {
 
     // 6. Set cooldown in Redis (only for normal withdrawals, not admin-queued ones)
     if (!requiresReview) {
-      await redis.set(cooldownKey, '1', 'EX', COOLDOWN_SECS);
-      // Update daily total
+      // Update daily total immediately — counts the attempt against the limit
       const secsUntilMidnight = WithdrawalService.secsUntilUtcMidnight();
       await redis.set(dailyKey, (dailyUsed + amountNum).toFixed(9), 'EX', secsUntilMidnight);
+      // Cooldown is set only after successful on-chain send (inside processWithdrawal)
     }
 
     logger.info(`Withdrawal requested: user=${userId} amount=${amount} TON dest=${destination} review=${requiresReview}`);
 
     // 7. Process immediately if under limit — fire and forget
     if (!requiresReview) {
-      WithdrawalService.processWithdrawal(transactionId, userId, destination, amount)
+      WithdrawalService.processWithdrawal(transactionId, userId, destination, amount, cooldownKey)
         .catch(err => logger.error(`Withdrawal processing failed: ${err.message}`));
     }
 
@@ -139,6 +139,7 @@ export class WithdrawalService {
     userId:        string,
     destination:   string,
     amount:        string,
+    cooldownKey?:  string,
   ): Promise<void> {
     try {
       await pool.query(
@@ -146,7 +147,6 @@ export class WithdrawalService {
         [transactionId],
       );
 
-      // TON SDK transfer
       const txHash = await WithdrawalService.sendTonTransfer(destination, amount);
 
       await pool.query(
@@ -154,9 +154,12 @@ export class WithdrawalService {
         [txHash, transactionId],
       );
 
-      // Notify user (PRD §11)
-      await NotificationService.send(userId, 'withdrawal_processed', { amount, txHash });
+      // Set cooldown only after successful send
+      if (cooldownKey) {
+        await redis.set(cooldownKey, '1', 'EX', COOLDOWN_SECS);
+      }
 
+      await NotificationService.send(userId, 'withdrawal_processed', { amount, txHash });
       logger.info(`Withdrawal sent: user=${userId} amount=${amount} TON hash=${txHash}`);
     } catch (err) {
       await pool.query(
@@ -273,11 +276,9 @@ export class WithdrawalService {
       );
     }
 
-    // Set cooldown for large withdrawal too
+    // Set cooldown after successful processing (passed into processWithdrawal)
     const cooldownKey = `${COOLDOWN_PREFIX}${tx.user_id}`;
-    await redis.set(cooldownKey, '1', 'EX', COOLDOWN_SECS);
-
-    await WithdrawalService.processWithdrawal(transactionId, tx.user_id, tx.destination, tx.amount);
+    await WithdrawalService.processWithdrawal(transactionId, tx.user_id, tx.destination, tx.amount, cooldownKey);
     logger.info(`Admin approved withdrawal: txId=${transactionId} amount=${tx.amount} TON`);
   }
 
