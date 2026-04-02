@@ -30,7 +30,7 @@ const ENDPOINTS: Record<AdminTab, string> = {
 };
 
 export function AdminDashboard() {
-  const { haptic } = useTelegram();
+  const { haptic, showBackButton, hideBackButton, hideMainButton } = useTelegram();
   const [tonConnectUI] = useTonConnectUI();
   const wallet = useTonWallet();
 
@@ -40,6 +40,16 @@ export function AdminDashboard() {
   const [summary,   setSummary]   = useState<Record<string, number> | null>(null);
   const [data,      setData]      = useState<Record<string, unknown> | null>(null);
   const [loading,   setLoading]   = useState(false);
+
+  // Use Telegram back button when in a tab, hide it on home view
+  useEffect(() => {
+    hideMainButton();
+    if (tab) {
+      return showBackButton(() => { setTab(null); setData(null); });
+    } else {
+      hideBackButton();
+    }
+  }, [tab]);
 
   async function handleAdminAuth() {
     if (!wallet) { setAuthError('Connect your treasury wallet first'); return; }
@@ -100,12 +110,12 @@ export function AdminDashboard() {
 
   // ── Tab detail view ────────────────────────────────────────────────────────
   if (tab) {
+    const current = TABS.find(t2 => t2.id === tab);
     return (
       <div style={s.container}>
         <div style={s.topBar}>
-          <button style={s.backBtn} onClick={() => { setTab(null); setData(null); }}>‹ Back</button>
-          <p style={s.topTitle}>{TABS.find(t2 => t2.id === tab)?.emoji} {TABS.find(t2 => t2.id === tab)?.label}</p>
-          <button style={s.refreshBtn} onClick={() => openTab(tab)}>↻</button>
+          <p style={s.greeting}>{current?.emoji} {current?.label}</p>
+          <button style={s.refreshBtn} onClick={() => openTab(tab)}>↻ Refresh</button>
         </div>
         <div style={s.content}>
           {loading && <p style={s.hint}>Loading…</p>}
@@ -335,9 +345,7 @@ const s: Record<string, React.CSSProperties> = {
   topBar:         { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 },
   greeting:       { color:'var(--tg-theme-hint-color)', fontSize:13, margin:0 },
   badge:          { background:'rgba(42,171,238,0.15)', color:'#2AABEE', fontSize:11, fontWeight:600, padding:'4px 10px', borderRadius:20 },
-  topTitle:       { color:'var(--tg-theme-text-color)', fontSize:16, fontWeight:700, margin:0 },
-  backBtn:        { background:'none', border:'none', color:'#2AABEE', fontSize:16, fontWeight:600, cursor:'pointer', padding:0 },
-  refreshBtn:     { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:8, width:32, height:32, fontSize:16, cursor:'pointer', color:'var(--tg-theme-text-color)' },
+  refreshBtn:     { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:8, padding:'6px 12px', fontSize:13, cursor:'pointer', color:'var(--tg-theme-text-color)' },
 
   // summary card
   summaryCard:    { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:16, marginBottom:16 },
