@@ -15,10 +15,22 @@
  */
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
+import { Address } from '@ton/core';
 import { AppError } from './errorHandler.js';
 import { logger } from '../utils/logger.js';
 
-const TREASURY_WALLET = process.env.TREASURY_WALLET_ADDRESS?.toLowerCase();
+/** Normalize any TON address format to raw lowercase hex: workchain:hash */
+function normalizeAddress(addr: string): string {
+  try {
+    return Address.parse(addr).toRawString().toLowerCase();
+  } catch {
+    return addr.toLowerCase();
+  }
+}
+
+const TREASURY_WALLET = process.env.TREASURY_WALLET_ADDRESS
+  ? normalizeAddress(process.env.TREASURY_WALLET_ADDRESS)
+  : undefined;
 
 export async function requireAdmin(req: Request, _res: Response, next: NextFunction): Promise<void> {
   if (!TREASURY_WALLET) {
@@ -35,7 +47,7 @@ export async function requireAdmin(req: Request, _res: Response, next: NextFunct
     return next(new AppError(403, 'Admin wallet header required', 'FORBIDDEN'));
   }
 
-  if (adminWallet.toLowerCase() !== TREASURY_WALLET) {
+  if (normalizeAddress(adminWallet) !== TREASURY_WALLET) {
     logger.warn(`Admin access attempt with wrong wallet: ${adminWallet}`);
     return next(new AppError(403, 'Not authorised — treasury wallet required', 'FORBIDDEN'));
   }
