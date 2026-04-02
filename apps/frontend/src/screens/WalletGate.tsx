@@ -43,8 +43,6 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       setError('Telegram session not found. Please reopen the app from Telegram.');
       return;
     }
-    console.log('[auth] initData length:', currentInitData.length);
-    console.log('[auth] initData:', currentInitData);
     setLoading(true);
     setError(null);
     try {
@@ -52,10 +50,8 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       const proof   = connectedWallet.connectItems?.tonProof;
       let res;
       if (proof && 'proof' in proof) {
-        console.log('[auth] sending proof:', JSON.stringify(proof.proof));
         res = await authApi.connect({ walletAddress: address, proof: proof.proof, initData: currentInitData });
       } else {
-        console.log('[auth] no proof, using verify');
         res = await authApi.verify({ walletAddress: address, initData: currentInitData });
       }
       setTokens(res.data.accessToken, res.data.refreshToken);
@@ -64,10 +60,8 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       hideMainButton();
       onConnected();
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { error?: string; message?: string }; status?: number } };
-      const msg = axiosErr?.response?.data?.error ?? axiosErr?.response?.data?.message;
-      const status = axiosErr?.response?.status;
-      console.error('[auth] failed', status, axiosErr?.response?.data);
+      const axiosErr = err as { response?: { data?: { error?: string }; status?: number } };
+      const msg = axiosErr?.response?.data?.error;
       setError(msg ?? 'Connection failed. Please try again.');
       haptic.error();
     } finally {

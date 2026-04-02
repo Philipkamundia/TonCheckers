@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import { logger } from './logger.js';
 
 /**
  * Validates Telegram Mini App initData using HMAC-SHA256.
@@ -63,8 +62,6 @@ export function validateInitData(initDataRaw: string): {
       .digest('hex');
 
     if (computedHash !== hash) {
-      // Log first 8 chars of each hash to help diagnose mismatches without exposing full values
-      logger.warn(`Hash mismatch: computed=${computedHash.slice(0, 8)}... received=${hash.slice(0, 8)}... dataCheckString preview: ${dataCheckString.slice(0, 100)}`);
       return { valid: false, error: 'Hash mismatch — initData tampered' };
     }
 
