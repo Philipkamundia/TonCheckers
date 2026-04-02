@@ -27,12 +27,26 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { accessToken } = useStore();
+  if (!accessToken) return <Navigate to="/connect?mode=admin" replace />;
+  return <>{children}</>;
+}
+
 function AppRoutes() {
   const { accessToken, user } = useStore();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
   const mode = searchParams.get('mode');
+
+  // If admin mode param is present and user is already authed, redirect to /admin immediately
+  useEffect(() => {
+    if (mode === 'admin' && accessToken && user) {
+      navigate('/admin', { replace: true });
+    }
+  }, [mode, accessToken, user]);
+
   const postAuthPath = mode === 'admin' ? '/admin' : '/';
 
   return (
@@ -62,9 +76,9 @@ function AppRoutes() {
       <Route path="/deposit"     element={<ProtectedRoute><Deposit /></ProtectedRoute>} />
       <Route path="/withdraw"    element={<ProtectedRoute><Withdraw /></ProtectedRoute>} />
       <Route path="/profile"     element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-      <Route path="/admin"       element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+      <Route path="/admin"       element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
-      {/* Catch-all — preserve mode param when redirecting to connect */}
+      {/* Catch-all */}
       <Route path="*" element={
         accessToken
           ? <Navigate to="/" replace />

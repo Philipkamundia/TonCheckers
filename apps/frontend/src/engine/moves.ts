@@ -31,21 +31,12 @@ function fwdDirs(sq: Square): [number,number][] {
 
 function simpleMovesFor(board: Board, row: number, col: number): Move[] {
   const sq = board[row][col];
+  const dirs = isKing(sq) ? ALL_DIRS : fwdDirs(sq);
   const moves: Move[] = [];
-  if (isKing(sq)) {
-    for (const [dr,dc] of fwdDirs(sq)) {
-      let nr = row+dr, nc = col+dc;
-      while (inBounds(nr,nc) && board[nr][nc] === EMPTY) {
-        moves.push({ from:{row,col}, to:{row:nr,col:nc}, captures:[] });
-        nr+=dr; nc+=dc;
-      }
-    }
-  } else {
-    for (const [dr,dc] of fwdDirs(sq)) {
-      const nr=row+dr, nc=col+dc;
-      if (inBounds(nr,nc) && board[nr][nc] === EMPTY)
-        moves.push({ from:{row,col}, to:{row:nr,col:nc}, captures:[] });
-    }
+  for (const [dr,dc] of dirs) {
+    const nr=row+dr, nc=col+dc;
+    if (inBounds(nr,nc) && board[nr][nc] === EMPTY)
+      moves.push({ from:{row,col}, to:{row:nr,col:nc}, captures:[] });
   }
   return moves;
 }

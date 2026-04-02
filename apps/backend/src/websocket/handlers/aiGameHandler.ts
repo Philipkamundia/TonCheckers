@@ -102,4 +102,37 @@ export function registerAiGameHandlers(io: Server, socket: Socket): void {
       socket.emit('ai.move_invalid', { gameId, reason: 'Server error' });
     }
   });
+
+  // ─── ai.undo ──────────────────────────────────────────────────────────────
+  socket.on('ai.undo', async ({ gameId }: { gameId: string }) => {
+    try {
+      const result = await AiGameService.undoLastMove(gameId, userId);
+      if (!result.ok) return socket.emit('ai.undo_fail', { reason: result.reason });
+      socket.emit('ai.state', { gameId, board: result.board, activePlayer: 1, remainingMs: 30_000 });
+    } catch (err) {
+      logger.error(`ai.undo: ${(err as Error).message}`);
+    }
+  });
+
+  // ─── ai.restart ───────────────────────────────────────────────────────────
+  socket.on('ai.restart', async ({ gameId }: { gameId: string }) => {
+    try {
+      const result = await AiGameService.restartGame(gameId, userId);
+      if (!result.ok) return socket.emit('error', { message: result.reason });
+      socket.emit('ai.state', { gameId, board: result.board, activePlayer: 1, remainingMs: 30_000 });
+    } catch (err) {
+      logger.error(`ai.restart: ${(err as Error).message}`);
+    }
+  });
+
+  // ─── ai.tip ───────────────────────────────────────────────────────────────
+  socket.on('ai.tip', async ({ gameId }: { gameId: string }) => {
+    try {
+      const result = await AiGameService.getTip(gameId, userId);
+      if (!result.ok) return socket.emit('ai.tip_result', { ok: false, reason: result.reason });
+      socket.emit('ai.tip_result', { ok: true, from: result.from, to: result.to });
+    } catch (err) {
+      logger.error(`ai.tip: ${(err as Error).message}`);
+    }
+  });
 }

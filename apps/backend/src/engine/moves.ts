@@ -35,28 +35,17 @@ function getForwardDirections(square: Square): Array<[number, number]> {
  */
 function getSimpleMoves(board: Board, row: number, col: number): Move[] {
   const square = board[row][col];
-  const dirs   = getForwardDirections(square);
   const moves: Move[] = [];
 
-  if (isKing(square)) {
-    // Flying king: slide along each diagonal until blocked
-    for (const [dr, dc] of dirs) {
-      let nr = row + dr;
-      let nc = col + dc;
-      while (inBounds(nr, nc) && board[nr][nc] === EMPTY) {
-        moves.push({ from: { row, col }, to: { row: nr, col: nc }, captures: [], isChain: false });
-        nr += dr;
-        nc += dc;
-      }
-    }
-  } else {
-    // Regular piece: one step forward
-    for (const [dr, dc] of dirs) {
-      const nr = row + dr;
-      const nc = col + dc;
-      if (inBounds(nr, nc) && board[nr][nc] === EMPTY) {
-        moves.push({ from: { row, col }, to: { row: nr, col: nc }, captures: [], isChain: false });
-      }
+  // Kings move one square in all 4 directions (no flying for simple moves)
+  // Regular pieces move one step forward only
+  const dirs = isKing(square) ? ALL_DIRECTIONS : getForwardDirections(square);
+
+  for (const [dr, dc] of dirs) {
+    const nr = row + dr;
+    const nc = col + dc;
+    if (inBounds(nr, nc) && board[nr][nc] === EMPTY) {
+      moves.push({ from: { row, col }, to: { row: nr, col: nc }, captures: [], isChain: false });
     }
   }
 

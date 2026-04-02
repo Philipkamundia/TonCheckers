@@ -25,6 +25,7 @@ export function AiGameRoom() {
   const [gameOver,   setGameOver]   = useState<{ result: string; winner?: number; reason?: string } | null>(null);
   const [invalid,    setInvalid]    = useState<string | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
+  const [tip,        setTip]        = useState<{ from: { row: number; col: number }; to: { row: number; col: number } } | null>(null);
 
   useEffect(() => { return showBackButton(() => navigate('/ai')); }, []);
 
@@ -38,6 +39,7 @@ export function AiGameRoom() {
         setBoard(data.board);
         setRemainingMs(data.remainingMs);
         setSelected(null);
+        setTip(null);
         setAiThinking(false);
         haptic.impact('light');
       }),
@@ -53,8 +55,12 @@ export function AiGameRoom() {
         setGameOver(data);
         haptic[data.winner === 1 ? 'success' : 'warning']();
       }),
-      on<{ board: Board }>('ai.state', (data) => setBoard(data.board)),
+      on<{ board: Board }>('ai.state', (data) => { setBoard(data.board); setSelected(null); setTip(null); }),
       on<{ remainingMs: number }>('game.tick', ({ remainingMs }) => setRemainingMs(remainingMs)),
+      on<{ ok: boolean; from?: { row: number; col: number }; to?: { row: number; col: number }; reason?: string }>('ai.tip_result', (data) => {
+        if (data.ok && data.from && data.to) setTip({ from: data.from, to: data.to });
+        else setInvalid(data.reason ?? 'No tip available');
+      }),
     ];
     return () => unsubs.forEach(u => u());
   }, [on]);
@@ -140,11 +146,15 @@ export function AiGameRoom() {
             const isSel   = selected?.row === row && selected?.col === col;
             const isDest  = validDests.has(key);
             const canMove = movablePieces.has(key);
+            const isTipFrom = tip?.from.row === row && tip?.from.col === col;
+            const isTipTo   = tip?.to.row   === row && tip?.to.col   === col;
 
             let bg = dark ? '#795548' : '#EFEBE9';
-            if (isSel)  bg = '#FFF9C4';
-            else if (isDest) bg = '#A5D6A7';  // green highlight for valid destinations
-            else if (dark && canMove && !selected) bg = '#8D6E63'; // subtle highlight on movable pieces
+            if (isSel)           bg = '#FFF9C4';
+            else if (isDest)     bg = '#A5D6A7';
+            else if (isTipFrom)  bg = '#FFE082';
+            else if (isTipTo)    bg = '#80DEEA';
+            else if (dark && canMove && !selected) bg = '#8D6E63';
 
             return (
               <div
@@ -164,6 +174,20 @@ export function AiGameRoom() {
         )}
       </div>
       {invalid && <p style={styles.invalid}>{invalid}</p>}
+      <div style={styles.actions}>
+        <button style={styles.actionBtn} onClick={() => { haptic.impact('light'); setTip(null); emit('ai.undo', { gameId }); }} disabled={aiThinking} title="Undo">
+          <span style={styles.actionIcon}>↩️</span>
+          <span style={styles.actionLabel}>Undo</span>
+        </button>
+        <button style={styles.actionBtn} onClick={() => { haptic.impact('medium'); setTip(null); setSelected(null); setGameOver(null); emit('ai.restart', { gameId }); }} title="Restart">
+          <span style={styles.actionIcon}>🔄</span>
+          <span style={styles.actionLabel}>Restart</span>
+        </button>
+        <button style={styles.actionBtn} onClick={() => { haptic.impact('light'); setTip(null); emit('ai.tip', { gameId }); }} disabled={aiThinking} title="Tip">
+          <span style={styles.actionIcon}>💡</span>
+          <span style={styles.actionLabel}>Tip</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -176,6 +200,10 @@ const styles: Record<string, React.CSSProperties> = {
   board:         { position:'relative', border:'2px solid var(--tg-theme-secondary-bg-color)', borderRadius:4 },
   invalid:       { color:'var(--tg-theme-destructive-text-color)', fontSize:13 },
   captureAlert:  { color:'#E53935', fontSize:13, fontWeight:600, margin:0 },
+  actions:       { display:'flex', gap:24, justifyContent:'center', width:'100%', maxWidth:400 },
+  actionBtn:     { display:'flex', flexDirection:'column', alignItems:'center', gap:4, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'10px 20px', cursor:'pointer', opacity:1 },
+  actionIcon:    { fontSize:22 },
+  actionLabel:   { color:'var(--tg-theme-text-color)', fontSize:11, fontWeight:500 },
   overContainer: { display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100vh', gap:16, padding:24, background:'var(--tg-theme-bg-color)' },
   overTitle:     { color:'var(--tg-theme-text-color)', fontSize:30, fontWeight:800 },
   overHint:      { color:'var(--tg-theme-hint-color)', fontSize:13, textAlign:'center' },

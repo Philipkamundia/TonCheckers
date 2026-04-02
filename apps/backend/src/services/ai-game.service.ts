@@ -130,10 +130,11 @@ export class AiGameService {
     const hash2    = hashBoardState(afterAi, 1);
     const state2   = nextGameState(state1, aiMoveResult, hash2, afterAi);
 
-    // Persist and reset timer for human's next turn
+    // Persist — include prevState snapshot for undo support
+    const state2WithPrev = { ...state2, prevState: state };
     await pool.query(
       `UPDATE games SET board_state=$1, active_player=1, move_count=$2, updated_at=NOW() WHERE id=$3`,
-      [state2, state2.moveCount, gameId],
+      [state2WithPrev, state2.moveCount, gameId],
     );
     await GameTimerService.startTimer(gameId, 1);
 
@@ -160,5 +161,68 @@ export class AiGameService {
       newState: state2,
       aiMove:  { from: aiMoveResult.from, to: aiMoveResult.to },
     };
+  }
+
+  /** Undo the last full round (human move + AI response). Restores prevState if stored. */
+  static async undoLastMove(gameId: string, userId: string): Promise<{
+    ok: boolean; board?: ReturnType<typeof initialGameState>['board']; reason?: string;
+  }> {
+    const { rows: [game] } = await pool.query(
+      `SELECT board_state AS "boardState", player1_id AS "player1Id"
+       FROM games WHERE id=$1 AND mode='ai' AND status='active'`,
+      [gameId],
+    );
+    if (!game || game.player1Id !== userId) return { ok: false, reason: 'Game not found' };
+
+    const prev = game.boardState?.prevState;
+    if (!prev) return { ok: false, reason: 'Nothing to undo' };
+
+    await pool.query(
+      `UPDATE games SET board_state=$1, active_player=1, move_count=$2, updated_at=NOW() WHERE id=$3`,
+      [prev, prev.moveCount, gameId],
+    );
+    await GameTimerService.startTimer(gameId, 1);
+    return { ok: true, board: prev.board };
+  }
+
+  /** Restart: reset the game to the initial board state. */
+  static async restartGame(gameId: string, userId: string): Promise<{
+    ok: boolean; board?: ReturnType<typeof initialGameState>['board']; reason?: string;
+  }> {
+    const { rows: [game] } = await pool.query(
+      `SELECT player1_id AS "player1Id", ai_difficulty AS "aiDifficulty"
+       FROM games WHERE id=$1 AND mode='ai'`,
+      [gameId],
+    );
+    if (!game || game.player1Id !== userId) return { ok: false, reason: 'Game not found' };
+
+    const fresh = initialGameState();
+    await pool.query(
+      `UPDATE games SET board_state=$1, active_player=1, move_count=0,
+         status='active', ended_at=NULL, updated_at=NOW() WHERE id=$2`,
+      [fresh, gameId],
+    );
+    await GameTimerService.startTimer(gameId, 1);
+    return { ok: true, board: fresh.board };
+  }
+
+  /** Tip: suggest the best move for the human using the AI engine. */
+  static async getTip(gameId: string, userId: string): Promise<{
+    ok: boolean;
+    from?: { row: number; col: number };
+    to?:   { row: number; col: number };
+    reason?: string;
+  }> {
+    const { rows: [game] } = await pool.query(
+      `SELECT board_state AS "boardState", player1_id AS "player1Id", ai_difficulty AS "aiDifficulty"
+       FROM games WHERE id=$1 AND mode='ai' AND status='active'`,
+      [gameId],
+    );
+    if (!game || game.player1Id !== userId) return { ok: false, reason: 'Game not found' };
+
+    // Use intermediate difficulty for tips regardless of game difficulty
+    const tip = getAiMove(game.boardState.board, 1, 'intermediate');
+    if (!tip) return { ok: false, reason: 'No moves available' };
+    return { ok: true, from: tip.from, to: tip.to };
   }
 }
