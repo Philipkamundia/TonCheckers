@@ -7,7 +7,8 @@ import { useNavigate } from 'react-router-dom';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { useTelegram } from '../hooks/useTelegram';
 import { balanceApi } from '../services/api';
-import { toNano } from '@ton/core';
+
+function toNano(ton: number): string { return Math.round(ton * 1_000_000_000).toString(); }
 
 const MIN_DEPOSIT = 0.5;
 const PRESETS = [0.5, 1, 2, 5, 10];
@@ -47,7 +48,7 @@ export function Deposit() {
 
     try {
       // Convert TON to nanotons (1 TON = 1e9 nanotons)
-      const nanoAmount = toNano(parsedAmount.toFixed(9)).toString();
+      const nanoAmount = toNano(parsedAmount);
 
       await tonConnectUI.sendTransaction({
         validUntil: Math.floor(Date.now() / 1000) + 600, // 10 min window
@@ -189,3 +190,4 @@ const s: Record<string, React.CSSProperties> = {
   successTitle:  { color: 'var(--tg-theme-text-color)', fontSize: 22, fontWeight: 700, margin: 0 },
   successDesc:   { color: 'var(--tg-theme-hint-color)', fontSize: 14, textAlign: 'center', lineHeight: 1.6, margin: 0 },
 };
+

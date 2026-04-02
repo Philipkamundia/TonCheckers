@@ -44,10 +44,11 @@ export function Home() {
 
       {/* Mode Grid */}
       <div style={styles.grid}>
-        <ModeCard emoji="⚔️" title="PvP" subtitle="Ranked wagering" onClick={() => navigate('/pvp')} primary />
-        <ModeCard emoji="🤖" title="Practice" subtitle="AI opponent" onClick={() => navigate('/ai')} />
-        <ModeCard emoji="🏆" title="Tournaments" subtitle="Compete for prize pool" onClick={() => navigate('/tournaments')} />
-        <ModeCard emoji="📊" title="Leaderboard" subtitle="Global rankings" onClick={() => navigate('/leaderboard')} />
+        <ModeCard emoji="⚔️" title="PvP"          subtitle="Ranked wagering"       onClick={() => navigate('/pvp')}         primary />
+        <ModeCard emoji="🤖" title="Practice"     subtitle="AI opponent"           onClick={() => navigate('/ai')} />
+        <ModeCard emoji="🏆" title="Tournaments"  subtitle="Compete for prize pool" onClick={() => navigate('/tournaments')} />
+        <ModeCard emoji="📊" title="Leaderboard"  subtitle="Global rankings"       onClick={() => navigate('/leaderboard')} />
+        <ModeCard emoji="👤" title="Profile"      subtitle="Stats & settings"      onClick={() => navigate('/profile')} />
       </div>
 
       {/* Wallet actions */}

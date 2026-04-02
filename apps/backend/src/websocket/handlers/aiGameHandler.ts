@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { AiGameService } from '../../services/ai-game.service.js';
 import { type AiDifficulty } from '../../engine/ai/index.js';
 import { logger } from '../../utils/logger.js';
+import pool from '../../config/db.js';
 
 export function registerAiGameHandlers(io: Server, socket: Socket): void {
   const userId = (socket as Socket & { userId: string }).userId;
@@ -42,7 +43,27 @@ export function registerAiGameHandlers(io: Server, socket: Socket): void {
     }
   });
 
-  // ─── ai.move ──────────────────────────────────────────────────────────────
+  // ─── ai.state.request ────────────────────────────────────────────────────
+  socket.on('ai.state.request', async ({ gameId }: { gameId: string }) => {
+    try {
+      const { rows: [game] } = await pool.query(
+        `SELECT id, board_state AS "boardState", active_player AS "activePlayer", ai_difficulty AS "aiDifficulty"
+         FROM games WHERE id=$1 AND mode='ai' AND player1_id=$2`,
+        [gameId, userId],
+      );
+      if (!game) return socket.emit('error', { message: 'Game not found' });
+      socket.join(`game:${gameId}`);
+      socket.emit('ai.state', {
+        gameId,
+        difficulty: game.aiDifficulty,
+        board:        game.boardState.board,
+        activePlayer: game.activePlayer,
+        remainingMs:  30_000,
+      });
+    } catch (err) {
+      logger.error(`ai.state.request: ${(err as Error).message}`);
+    }
+  });
   socket.on('ai.move', async ({ gameId, from, to }: {
     gameId: string;
     from: { row: number; col: number };

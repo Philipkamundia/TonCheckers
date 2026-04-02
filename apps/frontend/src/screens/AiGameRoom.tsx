@@ -28,6 +28,11 @@ export function AiGameRoom() {
 
   useEffect(() => { return showBackButton(() => navigate('/ai')); }, []);
 
+  // Request current game state on mount in case ai.state already fired
+  useEffect(() => {
+    if (gameId) emit('ai.state.request', { gameId });
+  }, [gameId]);
+
   useEffect(() => {
     const unsubs = [
       on<{ board: Board; activePlayer: number; remainingMs: number }>('ai.move_ok', (data) => {

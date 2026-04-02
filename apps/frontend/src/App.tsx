@@ -4,6 +4,7 @@ import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { useStore } from './store';
 import { WalletGate }        from './screens/WalletGate';
 import { Home }              from './screens/Home';
+import { applyTheme }        from './screens/Profile';
 import { PvpLobby }          from './screens/PvpLobby';
 import { LobbyRoom }         from './screens/LobbyRoom';
 import { GameRoom }          from './screens/GameRoom';
@@ -73,12 +74,22 @@ export function App() {
   // Hydrate user + balance from API on first load
   useEffect(() => { hydrate(); }, []);
 
-  // Apply Telegram theme CSS variables globally
+  // Apply saved theme override immediately on mount, before Telegram theme runs
+  useEffect(() => {
+    const saved = (localStorage.getItem('app_theme') ?? 'system') as 'system' | 'light' | 'dark';
+    if (saved !== 'system') applyTheme(saved);
+  }, []);
+
+  // Apply Telegram theme CSS variables globally (skipped if user has override)
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
     if (!tg) return;
 
     const applyTheme = () => {
+      // Don't override if user has a manual theme set
+      const saved = localStorage.getItem('app_theme');
+      if (saved === 'dark' || saved === 'light') return;
+
       const root = document.documentElement;
       const p    = tg.themeParams;
       if (p.bg_color)           root.style.setProperty('--tg-theme-bg-color',            p.bg_color);

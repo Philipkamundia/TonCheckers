@@ -10,6 +10,28 @@ import { balanceApi } from '../services/api';
 
 type Theme = 'system' | 'light' | 'dark';
 
+export function applyTheme(theme: Theme) {
+  const root = document.documentElement;
+  if (theme === 'dark') {
+    root.style.setProperty('--tg-theme-bg-color',           '#1c1c1e');
+    root.style.setProperty('--tg-theme-secondary-bg-color', '#2c2c2e');
+    root.style.setProperty('--tg-theme-text-color',         '#ffffff');
+    root.style.setProperty('--tg-theme-hint-color',         '#8e8e93');
+  } else if (theme === 'light') {
+    root.style.setProperty('--tg-theme-bg-color',           '#f2f2f7');
+    root.style.setProperty('--tg-theme-secondary-bg-color', '#ffffff');
+    root.style.setProperty('--tg-theme-text-color',         '#000000');
+    root.style.setProperty('--tg-theme-hint-color',         '#6d6d72');
+  }
+  // 'system' — Telegram's theme vars take over; clear overrides
+  if (theme === 'system') {
+    root.style.removeProperty('--tg-theme-bg-color');
+    root.style.removeProperty('--tg-theme-secondary-bg-color');
+    root.style.removeProperty('--tg-theme-text-color');
+    root.style.removeProperty('--tg-theme-hint-color');
+  }
+}
+
 export function Profile() {
   const { showBackButton, hideMainButton, haptic } = useTelegram();
   const { user, balance, setBalance, logout } = useStore();
@@ -33,19 +55,7 @@ export function Profile() {
   // Apply theme override
   useEffect(() => {
     localStorage.setItem('app_theme', theme);
-    const root = document.documentElement;
-    if (theme === 'dark') {
-      root.style.setProperty('--tg-theme-bg-color',           '#1c1c1e');
-      root.style.setProperty('--tg-theme-secondary-bg-color', '#2c2c2e');
-      root.style.setProperty('--tg-theme-text-color',         '#ffffff');
-      root.style.setProperty('--tg-theme-hint-color',         '#8e8e93');
-    } else if (theme === 'light') {
-      root.style.setProperty('--tg-theme-bg-color',           '#f2f2f7');
-      root.style.setProperty('--tg-theme-secondary-bg-color', '#ffffff');
-      root.style.setProperty('--tg-theme-text-color',         '#000000');
-      root.style.setProperty('--tg-theme-hint-color',         '#6d6d72');
-    }
-    // 'system' — leave Telegram's theme vars as-is
+    applyTheme(theme);
   }, [theme]);
 
   function copyAddress() {
