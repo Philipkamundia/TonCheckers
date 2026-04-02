@@ -65,13 +65,12 @@ export function applyMoveWithPromotion(board: Board, move: Move): Board {
 
 /**
  * Create the next GameState after a move is applied.
+ * Accepts the already-computed next board to avoid double-applying the move.
  * Switches active player and increments move count.
  */
-export function nextGameState(state: GameState, move: Move, boardHash: string): GameState {
-  const newBoard = applyMoveWithPromotion(state.board, move);
-
+export function nextGameState(state: GameState, _move: Move, boardHash: string, nextBoard: Board): GameState {
   return {
-    board:            newBoard,
+    board:            nextBoard,
     activePlayer:     state.activePlayer === 1 ? 2 : 1,
     boardHashHistory: [...state.boardHashHistory, boardHash],
     moveCount:        state.moveCount + 1,

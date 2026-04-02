@@ -101,7 +101,7 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
       const newBoard   = applyMoveWithPromotion(game.boardState.board, move);
       const nextPlayer: Player = playerNum === 1 ? 2 : 1;
       const newHash    = hashBoardState(newBoard, nextPlayer);
-      const newState   = nextGameState(game.boardState, move, newHash);
+      const newState   = nextGameState(game.boardState, move, newHash, newBoard);
 
       await GameService.updateBoardState(gameId, newState, nextPlayer, newState.moveCount);
       await GameTimerService.startTimer(gameId, nextPlayer);

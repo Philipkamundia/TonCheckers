@@ -84,7 +84,7 @@ export class AiGameService {
 
     const afterHuman = applyMoveWithPromotion(state.board, move);
     const hash1      = hashBoardState(afterHuman, 2);
-    const state1     = nextGameState(state, move, hash1);
+    const state1     = nextGameState(state, move, hash1, afterHuman);
 
     // Check if human won
     const afterHumanResult = checkWinCondition(afterHuman, 2, state1.boardHashHistory);
@@ -125,7 +125,7 @@ export class AiGameService {
 
     const afterAi  = applyMoveWithPromotion(state1.board, aiMoveResult);
     const hash2    = hashBoardState(afterAi, 1);
-    const state2   = nextGameState(state1, aiMoveResult, hash2);
+    const state2   = nextGameState(state1, aiMoveResult, hash2, afterAi);
 
     // Persist and reset timer for human's next turn
     await pool.query(
