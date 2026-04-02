@@ -60,8 +60,9 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       haptic.success();
       hideMainButton();
       onConnected();
-    } catch {
-      setError('Connection failed. Please try again.');
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setError(msg ?? 'Connection failed. Please try again.');
       haptic.error();
     } finally {
       setLoading(false);
