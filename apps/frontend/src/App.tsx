@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { useStore } from './store';
 import { WalletGate }        from './screens/WalletGate';
@@ -30,9 +30,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AppRoutes() {
   const { accessToken, user } = useStore();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  // Preserve mode param through auth flow
-  const mode = new URLSearchParams(window.location.search).get('mode');
+  const mode = searchParams.get('mode');
   const postAuthPath = mode === 'admin' ? '/admin' : '/';
 
   return (
@@ -47,24 +47,22 @@ function AppRoutes() {
       {/* Protected — all game screens */}
       <Route path="/" element={<ProtectedRoute><Home /></ProtectedRoute>} />
 
-      <Route path="/pvp"       element={<ProtectedRoute><PvpLobby /></ProtectedRoute>} />
+      <Route path="/pvp"           element={<ProtectedRoute><PvpLobby /></ProtectedRoute>} />
       <Route path="/lobby/:gameId" element={<ProtectedRoute><LobbyRoom /></ProtectedRoute>} />
       <Route path="/game/:gameId"  element={<ProtectedRoute><GameRoom /></ProtectedRoute>} />
 
       <Route path="/ai"              element={<ProtectedRoute><AiSelect /></ProtectedRoute>} />
       <Route path="/ai-game/:gameId" element={<ProtectedRoute><AiGameRoom /></ProtectedRoute>} />
 
-      <Route path="/tournaments"           element={<ProtectedRoute><TournamentList /></ProtectedRoute>} />
-      <Route path="/tournaments/create"    element={<ProtectedRoute><TournamentCreate /></ProtectedRoute>} />
-      <Route path="/tournaments/:id"       element={<ProtectedRoute><TournamentDetail /></ProtectedRoute>} />
+      <Route path="/tournaments"        element={<ProtectedRoute><TournamentList /></ProtectedRoute>} />
+      <Route path="/tournaments/create" element={<ProtectedRoute><TournamentCreate /></ProtectedRoute>} />
+      <Route path="/tournaments/:id"    element={<ProtectedRoute><TournamentDetail /></ProtectedRoute>} />
 
       <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
       <Route path="/deposit"     element={<ProtectedRoute><Deposit /></ProtectedRoute>} />
       <Route path="/withdraw"    element={<ProtectedRoute><Withdraw /></ProtectedRoute>} />
       <Route path="/profile"     element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-
-      {/* Admin — only accessible via bot link with ?mode=admin */}
-      <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+      <Route path="/admin"       element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
 
       {/* Catch-all — preserve mode param when redirecting to connect */}
       <Route path="*" element={
