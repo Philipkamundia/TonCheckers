@@ -154,8 +154,8 @@ export class AuthService {
       }
       const pubKey = stateInitBuf.slice(-32);
 
-      const { verify: ed25519Verify } = await import('@ton/crypto');
-      const valid = await ed25519Verify(finalHash, sigBuf, pubKey);
+      const { signVerify } = await import('@ton/crypto');
+      const valid = await signVerify(finalHash, sigBuf, pubKey);
       if (!valid) {
         logger.warn(`TonConnect signature invalid for ${walletAddress}`);
         return false;

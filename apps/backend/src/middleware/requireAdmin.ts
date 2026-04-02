@@ -75,9 +75,9 @@ export async function requireAdmin(req: Request, _res: Response, next: NextFunct
       return next(new AppError(403, 'Invalid signature format', 'FORBIDDEN'));
     }
 
-    const { verify: ed25519Verify } = await import('@ton/crypto');
+    const { signVerify } = await import('@ton/crypto');
     const challengeHash = crypto.createHash('sha256').update(adminChallenge).digest();
-    const valid = await ed25519Verify(challengeHash, sigBuf, pubKey);
+    const valid = await signVerify(challengeHash, sigBuf, pubKey);
     if (!valid) {
       logger.warn(`Admin signature invalid for wallet=${adminWallet}`);
       return next(new AppError(403, 'Invalid admin signature', 'FORBIDDEN'));
