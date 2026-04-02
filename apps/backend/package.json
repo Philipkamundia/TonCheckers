@@ -6,7 +6,7 @@
   "scripts": {
     "dev":     "tsx watch src/index.ts",
     "build":   "tsc",
-    "start":   "node dist/index.js",
+    "start":   "node dist/src/index.js",
     "migrate": "tsx scripts/migrate.ts",
     "seed":    "tsx scripts/seed.ts",
     "lint":    "eslint src --ext .ts --report-unused-disable-directives --max-warnings 0",
@@ -14,7 +14,6 @@
     "clean":   "rimraf dist"
   },
   "dependencies": {
-    "@ton-checkers/shared": "*",
     "@ton/core":         "^0.62.0",
     "@ton/crypto":       "^3.3.0",
     "@ton/ton":          "^15.3.1",
