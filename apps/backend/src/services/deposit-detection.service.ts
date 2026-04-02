@@ -137,10 +137,18 @@ export class DepositDetectionService {
       );
       if (!rowCount) { await client.query('ROLLBACK'); return; }
 
-      await client.query(
+      const { rowCount: balRowCount } = await client.query(
         `UPDATE balances SET available = available + $1::numeric, updated_at = NOW() WHERE user_id = $2`,
         [amountStr, userId],
       );
+      if (!balRowCount) {
+        // Balance row missing — create it and credit
+        await client.query(
+          `INSERT INTO balances (user_id, available, locked) VALUES ($1, $2, 0)
+           ON CONFLICT (user_id) DO UPDATE SET available = balances.available + $2::numeric, updated_at = NOW()`,
+          [userId, amountStr],
+        );
+      }
       await client.query('COMMIT');
       logger.info(`Deposit confirmed: user=${userId} amount=${amountStr} TON hash=${tx.hash}`);
       await NotificationService.send(userId, 'deposit_confirmed', { amount: amountStr });

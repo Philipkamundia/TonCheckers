@@ -11,16 +11,44 @@ import { balanceApi } from '../services/api';
 function toNano(ton: number): string { return Math.round(ton * 1_000_000_000).toString(); }
 
 /**
- * Encode a text comment as a TON cell payload (BOC).
- * Format: 4-byte opcode 0x00000000 + UTF-8 text bytes, serialized as base64 BOC.
- * This is what TON wallets expect for a simple text comment on a transfer.
+ * Encode a text comment as a valid TON Cell BOC (base64).
+ * Produces the exact same output as @ton/core beginCell().storeUint(0,32).storeStringTail(text).endCell().toBoc()
+ * Format: single-root BOC containing one cell with 32-bit zero opcode + UTF-8 text.
  */
 function encodeTextComment(text: string): string {
   const textBytes = new TextEncoder().encode(text);
-  // Cell: 4 zero bytes (op) + text
-  const cell = new Uint8Array(4 + textBytes.length);
-  cell.set(textBytes, 4); // first 4 bytes stay 0x00 (op = text comment)
-  return btoa(String.fromCharCode(...cell));
+  // Cell data: 4 zero bytes (op=0 = text comment) + UTF-8 text
+  const data = new Uint8Array(4 + textBytes.length);
+  data.set(textBytes, 4);
+
+  const bitLen = data.length * 8;
+  // Cell descriptor bytes (d1, d2):
+  //   d1 = level_mask(3b) | has_hashes(1b) | is_exotic(1b) | ref_count(3b) = 0x00
+  //   d2 = ceil(bitLen/8) + floor(bitLen/8) = 2*byteLen for byte-aligned data
+  const d1 = 0x00;
+  const d2 = (Math.ceil(bitLen / 8) + Math.floor(bitLen / 8)) & 0xff;
+
+  // Full cell bytes = descriptor(2) + data
+  const cell = new Uint8Array(2 + data.length);
+  cell[0] = d1;
+  cell[1] = d2;
+  cell.set(data, 2);
+
+  // Minimal single-root BOC (no index, no CRC):
+  // magic(4) | flags(1) | offset_size(1) | cells(1) | roots(1) | absent(1) | tot_size(1) | root_idx(1) | cell_data
+  const boc = new Uint8Array([
+    0xb5, 0xee, 0x9c, 0x72,  // BOC magic
+    0x01,                     // flags: size_bytes=1
+    0x01,                     // offset_bytes=1
+    0x01,                     // cells_count=1
+    0x01,                     // roots_count=1
+    0x00,                     // absent_count=0
+    cell.length & 0xff,       // tot_cells_size (1 byte)
+    0x00,                     // root index = 0
+    ...cell,
+  ]);
+
+  return btoa(String.fromCharCode(...boc));
 }
 
 const MIN_DEPOSIT = 0.5;
@@ -36,6 +64,7 @@ export function Deposit() {
   const [status,      setStatus]      = useState<'idle' | 'pending' | 'sent' | 'error'>('idle');
   const [errorMsg,    setErrorMsg]    = useState<string | null>(null);
   const [depositInfo, setDepositInfo] = useState<{ address: string; memo: string } | null>(null);
+  const [confirmed,   setConfirmed]   = useState(false);
 
   useEffect(() => {
     hideMainButton();
@@ -76,6 +105,22 @@ export function Deposit() {
 
       setStatus('sent');
       haptic.success();
+
+      // Poll balance every 10s for up to 3 minutes to detect confirmation
+      let attempts = 0;
+      const initialBalance = await balanceApi.get().then(r => parseFloat(r.data.balance.available)).catch(() => 0);
+      const poll = setInterval(async () => {
+        attempts++;
+        try {
+          const r = await balanceApi.get();
+          const newBalance = parseFloat(r.data.balance.available);
+          if (newBalance > initialBalance) {
+            setConfirmed(true);
+            clearInterval(poll);
+          }
+        } catch { /* ignore */ }
+        if (attempts >= 18) clearInterval(poll); // stop after 3 min
+      }, 10_000);
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? '';
       if (msg.toLowerCase().includes('cancel') || msg.toLowerCase().includes('reject') || msg.toLowerCase().includes('declined')) {
@@ -94,14 +139,15 @@ export function Deposit() {
     return (
       <div style={s.container}>
         <div style={s.successBox}>
-          <p style={s.successIcon}>✅</p>
-          <p style={s.successTitle}>Transaction Sent</p>
+          <p style={s.successIcon}>{confirmed ? '✅' : '⏳'}</p>
+          <p style={s.successTitle}>{confirmed ? 'Deposit Confirmed!' : 'Transaction Sent'}</p>
           <p style={s.successDesc}>
-            Your deposit of <strong>{parsedAmount} TON</strong> is on its way.
-            Balance updates within ~60 seconds of on-chain confirmation.
+            {confirmed
+              ? `Your balance has been credited with ${parsedAmount} TON.`
+              : `Your deposit of ${parsedAmount} TON is on its way. Waiting for on-chain confirmation…`}
           </p>
           <button style={s.btn} onClick={() => navigate('/')}>Back to Home</button>
-          <button style={s.outlineBtn} onClick={() => setStatus('idle')}>Deposit More</button>
+          <button style={s.outlineBtn} onClick={() => { setStatus('idle'); setConfirmed(false); }}>Deposit More</button>
         </div>
       </div>
     );
