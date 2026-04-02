@@ -21,6 +21,7 @@ import { startTreasuryMonitor } from './jobs/treasuryMonitor.js';
 import { startTournamentStartCheck } from './jobs/tournamentStartCheck.js';
 import { startLeaderboardRebuild } from './jobs/leaderboardRebuild.js';
 import { logger } from './utils/logger.js';
+import { runMigrations } from './migrate.js';
 
 const app        = express();
 const httpServer = createServer(app);
@@ -83,6 +84,9 @@ app.use(errorHandler);
 
 httpServer.listen(PORT, async () => {
   logger.info(`🚀 CheckTON backend on port ${PORT}`);
+
+  // Run DB migrations on every startup — idempotent, safe to run repeatedly
+  await runMigrations();
 
   const recovered = await GameService.recoverCrashedGames();
   if (recovered.length) logger.warn(`Recovered ${recovered.length} crashed games`);
