@@ -43,6 +43,8 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       setError('Telegram session not found. Please reopen the app from Telegram.');
       return;
     }
+    console.log('[auth] initData length:', currentInitData.length);
+    console.log('[auth] initData:', currentInitData);
     setLoading(true);
     setError(null);
     try {
