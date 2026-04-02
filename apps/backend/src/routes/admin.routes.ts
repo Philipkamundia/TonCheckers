@@ -10,8 +10,17 @@ export const adminRouter = Router();
 adminRouter.get('/challenge', adminController.getChallenge);
 
 // Admin bot webhook — public, called by Telegram servers (no auth)
+// Telegram includes X-Telegram-Bot-Api-Secret-Token header for verification
 adminRouter.post('/bot-webhook', async (req, res, next) => {
   try {
+    const secret = process.env.TELEGRAM_BOT_SECRET;
+    if (secret) {
+      const incoming = req.headers['x-telegram-bot-api-secret-token'];
+      if (incoming !== secret) {
+        res.status(403).json({ ok: false, error: 'Invalid secret token' });
+        return;
+      }
+    }
     await handleAdminBotWebhook(req.body);
     res.json({ ok: true });
   } catch (err) {
