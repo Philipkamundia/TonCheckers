@@ -24,20 +24,30 @@ export function validateInitData(initDataRaw: string): {
   }
 
   try {
-    const params = new URLSearchParams(initDataRaw);
-    const hash = params.get('hash');
+    // Split raw string manually to preserve original encoding for hash check
+    const rawPairs = initDataRaw.split('&');
+    let hash: string | null = null;
+    const checkPairs: string[] = [];
+
+    for (const pair of rawPairs) {
+      const eqIdx = pair.indexOf('=');
+      if (eqIdx === -1) continue;
+      const key = decodeURIComponent(pair.slice(0, eqIdx));
+      const rawValue = pair.slice(eqIdx + 1); // keep raw (encoded) value for hash
+      if (key === 'hash') {
+        hash = decodeURIComponent(rawValue);
+      } else {
+        // data_check_string uses key=rawValue (as Telegram sent it)
+        checkPairs.push(`${key}=${rawValue}`);
+      }
+    }
 
     if (!hash) {
       return { valid: false, error: 'Missing hash in initData' };
     }
 
-    // Build data_check_string — all fields except hash, sorted alphabetically
-    const pairs: string[] = [];
-    params.forEach((value, key) => {
-      if (key !== 'hash') pairs.push(`${key}=${value}`);
-    });
-    pairs.sort();
-    const dataCheckString = pairs.join('\n');
+    checkPairs.sort();
+    const dataCheckString = checkPairs.join('\n');
 
     // Derive secret key: HMAC-SHA256(bot_token, "WebAppData")
     const secretKey = crypto
@@ -55,15 +65,15 @@ export function validateInitData(initDataRaw: string): {
       return { valid: false, error: 'Hash mismatch — initData tampered' };
     }
 
-    // Check auth_date is not too old (max 24 hours for active sessions)
-    // Note: only enforce on first connect, not on re-auth (verify endpoint)
+    // Check auth_date is not too old (max 24 hours)
+    const params = new URLSearchParams(initDataRaw);
     const authDate = parseInt(params.get('auth_date') || '0', 10);
     const age = Math.floor(Date.now() / 1000) - authDate;
     if (age > 86_400) {
       return { valid: false, error: 'initData expired (older than 24 hours)' };
     }
 
-    // Parse user object if present
+    // Parse decoded data for use in app
     const data: Record<string, string> = {};
     params.forEach((value, key) => { data[key] = value; });
 

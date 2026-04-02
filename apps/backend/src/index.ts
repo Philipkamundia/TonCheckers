@@ -65,6 +65,15 @@ app.get('/health', async (_req, res) => {
   });
 });
 
+// Temporary debug — remove after auth is confirmed working
+app.post('/debug/validate-init', (req, res) => {
+  const { initData } = req.body;
+  if (!initData) return res.json({ ok: false, error: 'no initData provided' });
+  const { validateInitData } = require('./utils/validateInitData.js');
+  const result = validateInitData(initData);
+  return res.json({ ...result, botTokenPresent: !!process.env.TELEGRAM_BOT_TOKEN });
+});
+
 configureRoutes(app, io);
 app.use(notFoundHandler);
 app.use(errorHandler);
