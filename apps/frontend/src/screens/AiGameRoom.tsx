@@ -71,10 +71,6 @@ export function AiGameRoom() {
     return getAvailableMoves(board as any, 1);
   }, [board, aiThinking, gameOver]);
 
-  // True when captures are mandatory this turn
-  const mustCapture = useMemo(() => legalMoves.some(m => m.captures.length > 0), [legalMoves]);
-
-  // Which pieces can move (sources of legal moves)
   const movablePieces = useMemo(() =>
     new Set(legalMoves.map(m => `${m.from.row},${m.from.col}`)),
   [legalMoves]);
@@ -136,7 +132,6 @@ export function AiGameRoom() {
         <span style={styles.turnLabel}>{aiThinking ? '🤖 AI thinking…' : '🟢 Your turn'}</span>
         <span style={{ ...styles.timer, color: secs <= 5 ? '#E53935' : 'var(--tg-theme-text-color)' }}>{secs}s</span>
       </div>
-      {mustCapture && !aiThinking && <p style={styles.captureAlert}>⚠️ Capture is mandatory</p>}
       <div style={{ ...styles.board, width: CELL_SIZE * 8, height: CELL_SIZE * 8 }}>
         {board && [...Array(8).keys()].flatMap(row =>
           [...Array(8).keys()].map(col => {
@@ -199,7 +194,6 @@ const styles: Record<string, React.CSSProperties> = {
   timer:         { fontSize:20, fontWeight:700 },
   board:         { position:'relative', border:'2px solid var(--tg-theme-secondary-bg-color)', borderRadius:4 },
   invalid:       { color:'var(--tg-theme-destructive-text-color)', fontSize:13 },
-  captureAlert:  { color:'#E53935', fontSize:13, fontWeight:600, margin:0 },
   actions:       { display:'flex', gap:24, justifyContent:'center', width:'100%', maxWidth:400 },
   actionBtn:     { display:'flex', flexDirection:'column', alignItems:'center', gap:4, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'10px 20px', cursor:'pointer', opacity:1 },
   actionIcon:    { fontSize:22 },

@@ -37,36 +37,15 @@ export function AdminDashboard() {
       setAuthError('Connect your treasury wallet first');
       return;
     }
-
     try {
-      const challengeRes = await api.get('/api/admin/challenge');
-      const challenge    = challengeRes.data.challenge;
-
-      // Use the tonProof from the existing wallet connection
-      const proof = wallet.connectItems?.tonProof;
-      if (!proof || !('proof' in proof)) {
-        // No proof on current connection — need to reconnect with proof request
-        tonConnectUI.setConnectRequestParameters({
-          state: 'ready',
-          value: { tonProof: challenge },
-        });
-        setAuthError('Please disconnect and reconnect your treasury wallet to sign the challenge');
-        return;
-      }
-
-      const signature = proof.proof.signature;
-      const stateInit = (proof.proof as { signature: string; stateInit?: string }).stateInit ?? '';
-
-      api.defaults.headers.common['X-Admin-Wallet']     = wallet.account.address;
-      api.defaults.headers.common['X-Admin-Challenge']  = challenge;
-      api.defaults.headers.common['X-Admin-Signature']  = signature;
-      api.defaults.headers.common['X-Admin-State-Init'] = stateInit;
-
+      api.defaults.headers.common['X-Admin-Wallet'] = wallet.account.address;
       await api.get('/api/admin/summary');
       setAuthed(true);
+      setAuthError(null);
       haptic.success();
     } catch {
-      setAuthError('Authentication failed — treasury wallet required');
+      delete api.defaults.headers.common['X-Admin-Wallet'];
+      setAuthError('Authentication failed — make sure this is the treasury wallet');
       haptic.error();
     }
   }
@@ -100,10 +79,7 @@ export function AdminDashboard() {
         <h2 style={styles.title}>🔐 Admin Dashboard</h2>
         <p style={styles.hint}>Connect your treasury wallet to authenticate</p>
         {!wallet ? (
-          <button style={styles.authBtn} onClick={() => {
-            tonConnectUI.setConnectRequestParameters({ state: 'ready', value: { tonProof: `admin-${Date.now()}` } });
-            tonConnectUI.openModal();
-          }}>
+          <button style={styles.authBtn} onClick={() => tonConnectUI.openModal()}>
             Connect Treasury Wallet
           </button>
         ) : (
