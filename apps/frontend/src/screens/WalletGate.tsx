@@ -50,9 +50,10 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       const proof   = connectedWallet.connectItems?.tonProof;
       let res;
       if (proof && 'proof' in proof) {
+        console.log('[auth] sending proof:', JSON.stringify(proof.proof));
         res = await authApi.connect({ walletAddress: address, proof: proof.proof, initData: currentInitData });
       } else {
-        // No proof — verify/register via initData (backend will create user if new)
+        console.log('[auth] no proof, using verify');
         res = await authApi.verify({ walletAddress: address, initData: currentInitData });
       }
       setTokens(res.data.accessToken, res.data.refreshToken);
@@ -61,7 +62,10 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       hideMainButton();
       onConnected();
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      const axiosErr = err as { response?: { data?: { error?: string; message?: string }; status?: number } };
+      const msg = axiosErr?.response?.data?.error ?? axiosErr?.response?.data?.message;
+      const status = axiosErr?.response?.status;
+      console.error('[auth] failed', status, axiosErr?.response?.data);
       setError(msg ?? 'Connection failed. Please try again.');
       haptic.error();
     } finally {
