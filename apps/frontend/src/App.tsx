@@ -31,13 +31,17 @@ function AppRoutes() {
   const { accessToken, user } = useStore();
   const navigate = useNavigate();
 
+  // Preserve mode param through auth flow
+  const mode = new URLSearchParams(window.location.search).get('mode');
+  const postAuthPath = mode === 'admin' ? '/admin' : '/';
+
   return (
     <Routes>
       {/* Public — wallet gate */}
       <Route path="/connect" element={
         accessToken && user
-          ? <Navigate to={new URLSearchParams(window.location.search).get('mode') === 'admin' ? '/admin' : '/'} replace />
-          : <WalletGate onConnected={() => navigate('/', { replace: true })} />
+          ? <Navigate to={postAuthPath} replace />
+          : <WalletGate onConnected={() => navigate(postAuthPath, { replace: true })} />
       } />
 
       {/* Protected — all game screens */}
@@ -62,8 +66,12 @@ function AppRoutes() {
       {/* Admin — only accessible via bot link with ?mode=admin */}
       <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
 
-      {/* Catch-all → home or connect */}
-      <Route path="*" element={<Navigate to={accessToken ? '/' : '/connect'} replace />} />
+      {/* Catch-all — preserve mode param when redirecting to connect */}
+      <Route path="*" element={
+        accessToken
+          ? <Navigate to="/" replace />
+          : <Navigate to={mode ? `/connect?mode=${mode}` : '/connect'} replace />
+      } />
     </Routes>
   );
 }

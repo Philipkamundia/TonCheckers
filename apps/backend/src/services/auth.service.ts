@@ -247,17 +247,22 @@ export class AuthService {
       throw new AppError(401, `Invalid initData: ${initResult.error}`, 'INIT_DATA_INVALID');
     }
 
-    const proofValid = await AuthService.verifyTonConnectProof(walletAddress, proof);
-    if (!proofValid) {
-      throw new AppError(401, 'Invalid TonConnect proof', 'PROOF_INVALID');
+    // Check if user already exists — existing users don't need proof re-verification
+    const existingUser = await AuthService.findByWallet(walletAddress);
+    if (existingUser) {
+      const tokens = AuthService.issueTokens(existingUser.id, walletAddress);
+      return { user: existingUser, tokens, isNew: false };
     }
 
-    let user = await AuthService.findByWallet(walletAddress);
-    const isNew = !user;
-    if (!user) user = await AuthService.createUser(walletAddress, initResult.telegramId);
+    // New user — proof required to register
+    const proofValid = await AuthService.verifyTonConnectProof(walletAddress, proof);
+    if (!proofValid) {
+      throw new AppError(401, 'Invalid TonConnect proof — please reconnect your wallet', 'PROOF_INVALID');
+    }
 
+    const user = await AuthService.createUser(walletAddress, initResult.telegramId);
     const tokens = AuthService.issueTokens(user.id, walletAddress);
-    return { user, tokens, isNew };
+    return { user, tokens, isNew: true };
   }
 
   /** POST /auth/verify — re-auth on app resume (initData only, no proof needed) */

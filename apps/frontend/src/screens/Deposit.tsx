@@ -10,6 +10,19 @@ import { balanceApi } from '../services/api';
 
 function toNano(ton: number): string { return Math.round(ton * 1_000_000_000).toString(); }
 
+/**
+ * Encode a text comment as a TON cell payload (BOC).
+ * Format: 4-byte opcode 0x00000000 + UTF-8 text bytes, serialized as base64 BOC.
+ * This is what TON wallets expect for a simple text comment on a transfer.
+ */
+function encodeTextComment(text: string): string {
+  const textBytes = new TextEncoder().encode(text);
+  // Cell: 4 zero bytes (op) + text
+  const cell = new Uint8Array(4 + textBytes.length);
+  cell.set(textBytes, 4); // first 4 bytes stay 0x00 (op = text comment)
+  return btoa(String.fromCharCode(...cell));
+}
+
 const MIN_DEPOSIT = 0.5;
 const PRESETS = [0.5, 1, 2, 5, 10];
 
@@ -56,8 +69,7 @@ export function Deposit() {
           {
             address: depositInfo.address,
             amount:  nanoAmount,
-            // Memo encoded as a text comment payload
-            payload: btoa(depositInfo.memo),
+            payload: encodeTextComment(depositInfo.memo),
           },
         ],
       });
@@ -66,11 +78,11 @@ export function Deposit() {
       haptic.success();
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? '';
-      if (msg.toLowerCase().includes('cancel') || msg.toLowerCase().includes('reject')) {
+      if (msg.toLowerCase().includes('cancel') || msg.toLowerCase().includes('reject') || msg.toLowerCase().includes('declined')) {
         setStatus('idle');
       } else {
         setStatus('error');
-        setErrorMsg('Transaction failed. Please try again.');
+        setErrorMsg(`Transaction failed: ${msg || 'Please try again.'}`);
         haptic.error();
       }
     } finally {
