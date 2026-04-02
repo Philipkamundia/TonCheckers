@@ -1,0 +1,154 @@
+import pool from '../config/db.js';
+import { BalanceService } from './balance.service.js';
+import { NotificationService } from './notification.service.js';
+import { TreasuryService } from './treasury.service.js';
+import { logger } from '../utils/logger.js';
+
+const MIN_DEPOSIT_TON = parseFloat(process.env.MIN_DEPOSIT_TON || '0.5');
+const POLL_INTERVAL_MS = 30_000;
+
+interface TonTransaction {
+  hash:        string;
+  amount:      string;   // nanoTON string
+  memo:        string;
+  fromAddress: string;
+  timestamp:   number;
+}
+
+export class DepositDetectionService {
+  private static intervalId: ReturnType<typeof setInterval> | null = null;
+  private static running    = false;
+  private static polling    = false;  // guard against concurrent poll runs
+
+  static async start(): Promise<void> {
+    if (this.running) return;
+    this.running = true;
+    logger.info(`Deposit poller started — every ${POLL_INTERVAL_MS / 1000}s, min ${MIN_DEPOSIT_TON} TON`);
+    await this.poll();
+    this.intervalId = setInterval(async () => {
+      if (this.polling) {
+        logger.warn('Deposit poll skipped — previous poll still running');
+        return;
+      }
+      await this.poll();
+    }, POLL_INTERVAL_MS);
+  }
+
+  static stop(): void {
+    if (this.intervalId) { clearInterval(this.intervalId); this.intervalId = null; }
+    this.running = false;
+    logger.info('Deposit poller stopped');
+  }
+
+  private static async poll(): Promise<void> {
+    this.polling = true;
+    try {
+      const hotWallet = TreasuryService.getHotWalletAddress();
+      const txs = await this.fetchRecentTransactions(hotWallet);
+      for (const tx of txs) await this.processTransaction(tx);
+    } catch (err) {
+      logger.error(`Deposit poll failed: ${(err as Error).message}`);
+    } finally {
+      this.polling = false;
+    }
+  }
+
+  /** Fetch last 20 incoming txs from TON Center API */
+  private static async fetchRecentTransactions(address: string): Promise<TonTransaction[]> {
+    const apiKey  = process.env.TON_API_KEY;
+    const network = process.env.TON_NETWORK || 'testnet';
+    const base    = network === 'mainnet'
+      ? 'https://toncenter.com/api/v2'
+      : 'https://testnet.toncenter.com/api/v2';
+
+    const url = `${base}/getTransactions?address=${address}&limit=20${apiKey ? `&api_key=${apiKey}` : ''}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`TON API ${res.status}`);
+
+    const data = await res.json() as { ok: boolean; result: unknown[] };
+    if (!data.ok) return [];
+    return this.parse(data.result);
+  }
+
+  private static parse(raw: unknown[]): TonTransaction[] {
+    return raw.flatMap((item) => {
+      const tx  = item as Record<string, unknown>;
+      const msg = tx.in_msg as Record<string, unknown> | undefined;
+      if (!msg || String(msg.value || '0') === '0') return [];
+      return [{
+        hash:        String((tx.transaction_id as Record<string, unknown>)?.hash || tx.hash || ''),
+        amount:      String(msg.value),
+        memo:        String(msg.message || msg.comment || ''),
+        fromAddress: String(msg.source || ''),
+        timestamp:   Number(tx.utime || 0),
+      }];
+    });
+  }
+
+  private static async processTransaction(tx: TonTransaction): Promise<void> {
+    // Idempotency check — unique constraint on ton_tx_hash
+    const { rows } = await pool.query(
+      'SELECT id FROM transactions WHERE ton_tx_hash = $1', [tx.hash],
+    );
+    if (rows.length) return;
+
+    // Validate memo is present and looks like a UUID
+    const memo = tx.memo?.trim();
+    if (!memo) {
+      logger.warn(`Deposit ignored — no memo: hash=${tx.hash} from=${tx.fromAddress} amount=${Number(tx.amount) / 1e9} TON`);
+      return;
+    }
+
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(memo)) {
+      logger.warn(`Deposit ignored — memo is not a valid user ID: memo="${memo}" hash=${tx.hash} from=${tx.fromAddress}`);
+      return;
+    }
+
+    const userId = memo;
+    const { rows: [user] } = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (!user) {
+      logger.warn(`Deposit ignored — unknown user in memo: userId=${userId} hash=${tx.hash} from=${tx.fromAddress}`);
+      return;
+    }
+
+    const amountTon = Number(tx.amount) / 1_000_000_000;
+    const amountStr = amountTon.toFixed(9);
+
+    // Below minimum — record as failed, do not credit
+    if (amountTon < MIN_DEPOSIT_TON) {
+      logger.warn(`Deposit below minimum: ${amountTon} TON — user=${userId} hash=${tx.hash}`);
+      await pool.query(
+        `INSERT INTO transactions (user_id, type, status, amount, ton_tx_hash, memo)
+         VALUES ($1, 'deposit', 'failed', $2, $3, $4) ON CONFLICT (ton_tx_hash) DO NOTHING`,
+        [userId, amountStr, tx.hash, userId],
+      );
+      return;
+    }
+
+    // Credit atomically with final ON CONFLICT guard
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const { rowCount } = await client.query(
+        `INSERT INTO transactions (user_id, type, status, amount, ton_tx_hash, memo)
+         VALUES ($1, 'deposit', 'confirmed', $2, $3, $4) ON CONFLICT (ton_tx_hash) DO NOTHING`,
+        [userId, amountStr, tx.hash, userId],
+      );
+      if (!rowCount) { await client.query('ROLLBACK'); return; }
+
+      await client.query(
+        `UPDATE balances SET available = available + $1::numeric, updated_at = NOW() WHERE user_id = $2`,
+        [amountStr, userId],
+      );
+      await client.query('COMMIT');
+      logger.info(`Deposit confirmed: user=${userId} amount=${amountStr} TON hash=${tx.hash}`);
+      await NotificationService.send(userId, 'deposit_confirmed', { amount: amountStr });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      logger.error(`Deposit processing error: hash=${tx.hash} err=${(err as Error).message}`);
+    } finally {
+      client.release();
+    }
+  }
+}
