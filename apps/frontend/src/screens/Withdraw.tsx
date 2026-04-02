@@ -5,27 +5,30 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTonWallet } from '@tonconnect/ui-react';
 import { useTelegram } from '../hooks/useTelegram';
 import { useStore } from '../store';
 import { balanceApi } from '../services/api';
-import { getWalletAddress } from '../services/tonConnect';
 
 export function Withdraw() {
   const { showBackButton, showMainButton, setMainButtonLoading, haptic } = useTelegram();
   const { balance, setBalance } = useStore();
+  const wallet = useTonWallet();
   const navigate = useNavigate();
 
   const [amount,  setAmount]  = useState('');
   const [result,  setResult]  = useState<{ success: boolean; message: string } | null>(null);
-  const walletAddress         = getWalletAddress();
+  const walletAddress         = wallet?.account?.address ?? null;
   const available             = parseFloat(balance?.available ?? '0');
+  const MIN_WITHDRAW          = 0.1;
 
   useEffect(() => { return showBackButton(() => navigate('/')); }, []);
 
   useEffect(() => {
-    const valid = parseFloat(amount) > 0 && parseFloat(amount) <= available;
+    const val = parseFloat(amount);
+    const valid = !isNaN(val) && val >= MIN_WITHDRAW && val <= available && !!walletAddress;
     return showMainButton(`Withdraw ${amount || '0'} TON`, handleWithdraw, { disabled: !valid });
-  }, [amount, available]);
+  }, [amount, available, walletAddress]);
 
   async function handleWithdraw() {
     if (!walletAddress) return;
@@ -61,10 +64,16 @@ export function Withdraw() {
         placeholder="0.00"
         value={amount}
         onChange={e => setAmount(e.target.value)}
-        min="0.1"
+        min={MIN_WITHDRAW}
         step="0.1"
         max={available}
       />
+      {amount !== '' && parseFloat(amount) < MIN_WITHDRAW && (
+        <p style={styles.validationMsg}>Minimum withdrawal is {MIN_WITHDRAW} TON</p>
+      )}
+      {amount !== '' && parseFloat(amount) > available && (
+        <p style={styles.validationMsg}>Insufficient balance</p>
+      )}
 
       <div style={styles.destinationCard}>
         <p style={styles.destLabel}>Destination (your connected wallet)</p>
@@ -93,7 +102,8 @@ const styles: Record<string, React.CSSProperties> = {
   balanceLabel:    { color:'var(--tg-theme-hint-color)', fontSize:14 },
   balanceValue:    { color:'var(--tg-theme-text-color)', fontWeight:700, fontSize:22 },
   label:           { color:'var(--tg-theme-hint-color)', fontSize:13, margin:'0 0 6px' },
-  input:           { width:'100%', background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'14px', fontSize:20, color:'var(--tg-theme-text-color)', boxSizing:'border-box', marginBottom:16 },
+  input:           { width:'100%', background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'14px', fontSize:20, color:'var(--tg-theme-text-color)', boxSizing:'border-box', marginBottom:8 },
+  validationMsg:   { color:'#ff3b30', fontSize:12, margin:'0 0 12px' },
   destinationCard: { background:'var(--tg-theme-secondary-bg-color)', borderRadius:12, padding:14, marginBottom:12 },
   destLabel:       { color:'var(--tg-theme-hint-color)', fontSize:12, margin:'0 0 4px' },
   destAddress:     { color:'var(--tg-theme-text-color)', fontSize:13, wordBreak:'break-all', margin:'0 0 6px' },

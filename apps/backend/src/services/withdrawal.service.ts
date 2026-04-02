@@ -50,7 +50,8 @@ export class WithdrawalService {
     destination:   string,  // wallet address from frontend (must match connected wallet)
   ): Promise<WithdrawalRequest> {
     const amountNum = parseFloat(amount);
-    if (amountNum <= 0) throw new AppError(400, 'Amount must be positive', 'INVALID_AMOUNT');
+    if (isNaN(amountNum) || amountNum <= 0) throw new AppError(400, 'Amount must be positive', 'INVALID_AMOUNT');
+    if (amountNum < 0.1) throw new AppError(400, 'Minimum withdrawal is 0.1 TON', 'INVALID_AMOUNT');
 
     // 1. Verify destination matches connected wallet
     const { rows: [user] } = await pool.query(
@@ -227,10 +228,33 @@ export class WithdrawalService {
       ],
     });
 
-    // The real on-chain hash is only available after confirmation.
-    // Store a deterministic pending identifier: address + seqno.
-    // The deposit poller will match the confirmed tx and update it.
-    const txHash = `pending:${wallet.address.toString({ bounceable: false })}:seq${seqno}`;
+    // Wait briefly then fetch the actual tx hash from TON Center
+    await new Promise(r => setTimeout(r, 8_000));
+    try {
+      const network  = process.env.TON_NETWORK || 'testnet';
+      const base     = network === 'mainnet'
+        ? 'https://toncenter.com/api/v2'
+        : 'https://testnet.toncenter.com/api/v2';
+      const apiKeyParam = apiKey ? `&api_key=${apiKey}` : '';
+      const hotAddr  = wallet.address.toString({ bounceable: false });
+      const res      = await fetch(`${base}/getTransactions?address=${hotAddr}&limit=5${apiKeyParam}`);
+      const data     = await res.json() as { ok: boolean; result: Array<Record<string, unknown>> };
+      if (data.ok && data.result.length) {
+        // Find the tx matching our seqno — it's the most recent outgoing tx
+        const txHash = String(
+          (data.result[0].transaction_id as Record<string, unknown>)?.hash ?? data.result[0].hash ?? ''
+        );
+        if (txHash) {
+          logger.info(`TON transfer confirmed: ${amount} TON → ${destination} hash=${txHash}`);
+          return txHash;
+        }
+      }
+    } catch (pollErr) {
+      logger.warn(`Could not fetch tx hash after send: ${(pollErr as Error).message}`);
+    }
+
+    // Fallback identifier if polling fails — still unique and traceable
+    const txHash = `sent:${wallet.address.toString({ bounceable: false })}:seq${seqno}:${Date.now()}`;
     logger.info(`TON transfer sent: ${amount} TON → ${destination} seqno=${seqno}`);
     return txHash;
   }

@@ -20,6 +20,7 @@ import { startMatchmakingScan } from './jobs/matchmakingScan.js';
 import { startTreasuryMonitor } from './jobs/treasuryMonitor.js';
 import { startTournamentStartCheck } from './jobs/tournamentStartCheck.js';
 import { startLeaderboardRebuild } from './jobs/leaderboardRebuild.js';
+import { startWithdrawalRecoveryJob } from './jobs/withdrawalRecovery.js';
 import { logger } from './utils/logger.js';
 import { runMigrations } from './migrate.js';
 
@@ -94,6 +95,7 @@ httpServer.listen(PORT, async () => {
   startMatchmakingScan(io);
   startTournamentStartCheck(io);
   startLeaderboardRebuild();
+  startWithdrawalRecoveryJob();
 
   try {
     await DepositDetectionService.start();
@@ -110,6 +112,7 @@ httpServer.listen(PORT, async () => {
   logger.info(`  📊 Leaderboard rebuild`);
   logger.info(`  💰 Deposit poller`);
   logger.info(`  🏦 Treasury monitor`);
+  logger.info(`  🔄 Withdrawal recovery`);
 });
 
 const shutdown = () => {

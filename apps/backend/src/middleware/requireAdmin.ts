@@ -27,7 +27,8 @@ export function requireAdmin(req: Request, _res: Response, next: NextFunction): 
     return next(new AppError(503, 'Admin access not configured', 'ADMIN_NOT_CONFIGURED'));
   }
 
-  const adminWallet = req.headers['x-admin-wallet'] as string | undefined;
+  const adminWallet  = req.headers['x-admin-wallet']   as string | undefined;
+  const adminPasscode = req.headers['x-admin-passcode'] as string | undefined;
 
   if (!adminWallet) {
     return next(new AppError(403, 'Admin wallet header required', 'FORBIDDEN'));
@@ -36,6 +37,15 @@ export function requireAdmin(req: Request, _res: Response, next: NextFunction): 
   if (normalizeAddress(adminWallet) !== TREASURY_WALLET) {
     logger.warn(`Admin access denied for wallet: ${adminWallet}`);
     return next(new AppError(403, 'Not authorised — treasury wallet required', 'FORBIDDEN'));
+  }
+
+  // Passcode check
+  const expectedPasscode = process.env.ADMIN_PASSCODE;
+  if (expectedPasscode) {
+    if (!adminPasscode || adminPasscode !== expectedPasscode) {
+      logger.warn(`Admin passcode incorrect for wallet: ${adminWallet}`);
+      return next(new AppError(403, 'Invalid admin passcode', 'FORBIDDEN'));
+    }
   }
 
   logger.info(`Admin access granted: wallet=${adminWallet}`);

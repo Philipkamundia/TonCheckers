@@ -70,8 +70,7 @@ export class BalanceService {
   }
 
   /**
-   * Credit available balance — used on confirmed deposit.
-   * Uses SELECT FOR UPDATE to prevent race conditions.
+   * Credit available balance — used on confirmed deposit or refund.
    */
   static async creditBalance(
     userId: string,

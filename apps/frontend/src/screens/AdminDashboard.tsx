@@ -34,37 +34,58 @@ export function AdminDashboard() {
   const [tonConnectUI] = useTonConnectUI();
   const wallet = useTonWallet();
 
-  const [authed,    setAuthed]    = useState(false);
+  const [step,      setStep]      = useState<'wallet' | 'passcode' | 'dashboard'>('wallet');
+  const [passcode,  setPasscode]  = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [tab,       setTab]       = useState<AdminTab | null>(null);
   const [summary,   setSummary]   = useState<Record<string, number> | null>(null);
   const [data,      setData]      = useState<Record<string, unknown> | null>(null);
   const [loading,   setLoading]   = useState(false);
 
-  // Use Telegram back button when in a tab, hide it on home view
+  const authed = step === 'dashboard';
+
+  // When wallet connects, move to passcode step automatically
+  useEffect(() => {
+    if (wallet && step === 'wallet') setStep('passcode');
+    if (!wallet && step !== 'wallet') { setStep('wallet'); setPasscode(''); setAuthError(null); }
+  }, [wallet]);
+
+  // Auto-submit when 8 digits entered
+  useEffect(() => {
+    if (passcode.length === 8) handlePasscodeSubmit();
+  }, [passcode]);
+
   useEffect(() => {
     hideMainButton();
-    if (tab) {
-      return showBackButton(() => { setTab(null); setData(null); });
-    } else {
-      hideBackButton();
-    }
+    if (tab) return showBackButton(() => { setTab(null); setData(null); });
+    else hideBackButton();
   }, [tab]);
 
-  async function handleAdminAuth() {
-    if (!wallet) { setAuthError('Connect your treasury wallet first'); return; }
+  async function handlePasscodeSubmit() {
+    if (!wallet || passcode.length !== 8) return;
     try {
-      api.defaults.headers.common['X-Admin-Wallet'] = wallet.account.address;
+      api.defaults.headers.common['X-Admin-Wallet']   = wallet.account.address;
+      api.defaults.headers.common['X-Admin-Passcode'] = passcode;
       const res = await api.get('/api/admin/summary');
       setSummary(res.data.summary as Record<string, number>);
-      setAuthed(true);
+      setStep('dashboard');
       setAuthError(null);
       haptic.success();
     } catch {
       delete api.defaults.headers.common['X-Admin-Wallet'];
-      setAuthError('Authentication failed — make sure this is the treasury wallet');
+      delete api.defaults.headers.common['X-Admin-Passcode'];
+      setPasscode('');
+      setAuthError('Wrong passcode');
       haptic.error();
     }
+  }
+
+  function handleDigit(d: string) {
+    if (passcode.length < 8) setPasscode(p => p + d);
+  }
+
+  function handleDelete() {
+    setPasscode(p => p.slice(0, -1));
   }
 
   useEffect(() => {
@@ -82,27 +103,54 @@ export function AdminDashboard() {
     haptic.selection();
   }
 
-  // ── Auth screen ────────────────────────────────────────────────────────────
-  if (!authed) {
+  // ── Step 1: Connect wallet ─────────────────────────────────────────────────
+  if (step === 'wallet') {
     return (
       <div style={s.authContainer}>
         <div style={s.authLogo}>🔐</div>
         <p style={s.authTitle}>Admin Dashboard</p>
         <p style={s.authHint}>Connect your treasury wallet to continue</p>
         <div style={s.authCard}>
-          {!wallet ? (
-            <button style={s.primaryBtn} onClick={() => tonConnectUI.openModal()}>
-              Connect Treasury Wallet
+          <button style={s.primaryBtn} onClick={() => tonConnectUI.openModal()}>
+            Connect Treasury Wallet
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step 2: Passcode ───────────────────────────────────────────────────────
+  if (step === 'passcode') {
+    const dots = Array.from({ length: 8 }, (_, i) => i < passcode.length);
+    return (
+      <div style={s.authContainer}>
+        <div style={s.authLogo}>🔑</div>
+        <p style={s.authTitle}>Enter Passcode</p>
+        <p style={s.authHint}>
+          {wallet?.account.address.slice(0,8)}…{wallet?.account.address.slice(-6)}
+        </p>
+
+        {/* Dots */}
+        <div style={s.dotsRow}>
+          {dots.map((filled, i) => (
+            <div key={i} style={{ ...s.dot, ...(filled ? s.dotFilled : {}) }} />
+          ))}
+        </div>
+
+        {authError && <p style={s.error}>{authError}</p>}
+
+        {/* Numpad */}
+        <div style={s.numpad}>
+          {['1','2','3','4','5','6','7','8','9','','0','⌫'].map((k, i) => (
+            <button
+              key={i}
+              style={{ ...s.numKey, ...(k === '' ? s.numKeyEmpty : {}) }}
+              onClick={() => k === '⌫' ? handleDelete() : k !== '' ? handleDigit(k) : undefined}
+              disabled={k === ''}
+            >
+              {k}
             </button>
-          ) : (
-            <>
-              <p style={s.walletConnected}>✅ {wallet.account.address.slice(0,8)}…{wallet.account.address.slice(-6)}</p>
-              <button style={s.primaryBtn} onClick={handleAdminAuth}>
-                Authenticate
-              </button>
-            </>
-          )}
-          {authError && <p style={s.error}>{authError}</p>}
+          ))}
         </div>
       </div>
     );
@@ -335,11 +383,17 @@ const s: Record<string, React.CSSProperties> = {
   // auth
   authLogo:       { fontSize:56 },
   authTitle:      { color:'var(--tg-theme-text-color)', fontSize:24, fontWeight:700, margin:0 },
-  authHint:       { color:'var(--tg-theme-hint-color)', fontSize:14, textAlign:'center', margin:0 },
+  authHint:       { color:'var(--tg-theme-hint-color)', fontSize:13, textAlign:'center', margin:0, fontFamily:'monospace' },
   authCard:       { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:20, width:'100%', maxWidth:320, display:'flex', flexDirection:'column', gap:12 },
-  walletConnected:{ color:'#4CAF50', fontSize:13, textAlign:'center', margin:0 },
   primaryBtn:     { background:'#2AABEE', border:'none', borderRadius:12, padding:'14px', color:'#fff', fontSize:16, fontWeight:600, cursor:'pointer', width:'100%' },
   error:          { color:'var(--tg-theme-destructive-text-color)', fontSize:13, textAlign:'center', margin:0 },
+  // passcode
+  dotsRow:        { display:'flex', gap:12, margin:'8px 0' },
+  dot:            { width:14, height:14, borderRadius:'50%', border:'2px solid var(--tg-theme-hint-color)', background:'transparent' },
+  dotFilled:      { background:'#2AABEE', borderColor:'#2AABEE' },
+  numpad:         { display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, width:'100%', maxWidth:280 },
+  numKey:         { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:14, padding:'18px 0', fontSize:22, fontWeight:600, color:'var(--tg-theme-text-color)', cursor:'pointer' },
+  numKeyEmpty:    { background:'transparent', cursor:'default' },
 
   // top bar
   topBar:         { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 },
