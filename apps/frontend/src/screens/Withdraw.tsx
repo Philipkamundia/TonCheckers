@@ -11,7 +11,7 @@ import { useStore } from '../store';
 import { balanceApi } from '../services/api';
 
 export function Withdraw() {
-  const { showBackButton, showMainButton, setMainButtonLoading, haptic } = useTelegram();
+  const { showBackButton, showMainButton, setMainButtonLoading, hideMainButton, haptic } = useTelegram();
   const { balance, setBalance } = useStore();
   const wallet = useTonWallet();
   const navigate = useNavigate();
@@ -33,10 +33,14 @@ export function Withdraw() {
   useEffect(() => { return showBackButton(() => navigate('/')); }, []);
 
   useEffect(() => {
+    if (result?.success) {
+      hideMainButton();
+      return;
+    }
     const val = parseFloat(amount);
     const valid = !isNaN(val) && val >= MIN_WITHDRAW && val <= available && !!walletAddress;
     return showMainButton(`Withdraw ${amount || '0'} TON`, handleWithdraw, { disabled: !valid });
-  }, [amount, available, walletAddress]);
+  }, [amount, available, walletAddress, result]);
 
   async function handleWithdraw() {
     if (!walletAddress) return;

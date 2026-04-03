@@ -150,7 +150,7 @@ export class WithdrawalService {
       const txHash = await WithdrawalService.sendTonTransfer(destination, amount);
 
       await pool.query(
-        `UPDATE transactions SET status='sent', ton_tx_hash=$1, updated_at=NOW() WHERE id=$2`,
+        `UPDATE transactions SET status='confirmed', ton_tx_hash=$1, updated_at=NOW() WHERE id=$2`,
         [txHash, transactionId],
       );
 

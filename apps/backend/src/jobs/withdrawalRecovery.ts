@@ -53,7 +53,7 @@ async function recoverTransaction(tx: {
     // If we have a real on-chain hash, mark as sent — no refund needed
     if (tx.ton_tx_hash && !tx.ton_tx_hash.startsWith('pending:') && !tx.ton_tx_hash.startsWith('sent:')) {
       await pool.query(
-        `UPDATE transactions SET status='sent', updated_at=NOW() WHERE id=$1 AND status='processing'`,
+        `UPDATE transactions SET status='confirmed', updated_at=NOW() WHERE id=$1 AND status='processing'`,
         [tx.id],
       );
       logger.info(`Withdrawal recovery: confirmed tx=${tx.id} hash=${tx.ton_tx_hash}`);
@@ -66,7 +66,7 @@ async function recoverTransaction(tx: {
       const onChainHash = await checkOnChain(hotWallet, tx.destination, tx.amount);
       if (onChainHash) {
         await pool.query(
-          `UPDATE transactions SET status='sent', ton_tx_hash=$1, updated_at=NOW()
+          `UPDATE transactions SET status='confirmed', ton_tx_hash=$1, updated_at=NOW()
            WHERE id=$2 AND status='processing'`,
           [onChainHash, tx.id],
         );
