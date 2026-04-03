@@ -2,7 +2,10 @@
 nixPkgs = ["nodejs_22"]
 
 [phases.install]
-cmds = ["npm install --workspace=apps/backend --ignore-scripts=false"]
+cmds = [
+  "npm install --ignore-scripts",
+  "npm rebuild --workspace=apps/backend"
+]
 
 [phases.build]
 cmds = ["npm run build --workspace=apps/backend"]
