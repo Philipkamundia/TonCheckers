@@ -1,0 +1,11 @@
+[phases.setup]
+nixPkgs = ["nodejs_22"]
+
+[phases.install]
+cmds = ["npm install --workspace=apps/backend --ignore-scripts=false"]
+
+[phases.build]
+cmds = ["npm run build --workspace=apps/backend"]
+
+[start]
+cmd = "node apps/backend/dist/src/index.js"
