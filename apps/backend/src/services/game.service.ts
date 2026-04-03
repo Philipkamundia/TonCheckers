@@ -70,8 +70,6 @@ export class GameService {
 
   /** PRD §14 — crash recovery: refund all active and waiting games on server start */
   static async recoverCrashedGames(): Promise<string[]> {
-    // Recover both 'active' games (in-progress) and 'waiting' games (lobby countdown)
-    // Both have locked balances that must be returned
     const { rows } = await pool.query(
       `SELECT id, player1_id, player2_id, stake::text, status FROM games WHERE status IN ('active','waiting')`,
     );
@@ -83,6 +81,7 @@ export class GameService {
         await client.query('BEGIN');
 
         if (g.status === 'active') {
+          // Genuinely crashed mid-game — log it and notify players
           await client.query(
             `UPDATE games SET status='crashed', ended_at=NOW(), updated_at=NOW() WHERE id=$1`, [g.id],
           );
@@ -92,20 +91,23 @@ export class GameService {
             [g.id, g.player1_id, g.player2_id, g.stake],
           );
         } else {
-          // waiting — just cancel it, no crash log needed
+          // 'waiting' = lobby countdown — just cancel silently, no crash log, no notification
           await client.query(
             `UPDATE games SET status='cancelled', updated_at=NOW() WHERE id=$1`, [g.id],
           );
         }
 
-        // Refund locked stakes to both players
-        const playerIds = [g.player1_id, g.player2_id].filter(Boolean);
-        if (playerIds.length) {
-          await client.query(
-            `UPDATE balances SET available=available+$1::numeric, locked=locked-$1::numeric,
-               updated_at=NOW() WHERE user_id=ANY($2::uuid[])`,
-            [g.stake, playerIds],
-          );
+        // Only refund if there was an actual stake locked
+        const stakeNum = parseFloat(g.stake);
+        if (stakeNum > 0) {
+          const playerIds = [g.player1_id, g.player2_id].filter(Boolean);
+          if (playerIds.length) {
+            await client.query(
+              `UPDATE balances SET available=available+$1::numeric, locked=locked-$1::numeric,
+                 updated_at=NOW() WHERE user_id=ANY($2::uuid[]) AND locked >= $1::numeric`,
+              [g.stake, playerIds],
+            );
+          }
         }
 
         if (g.status === 'active') {
@@ -118,10 +120,15 @@ export class GameService {
         await client.query('COMMIT');
         recovered.push(g.id);
 
-        for (const uid of [g.player1_id, g.player2_id]) {
-          if (uid) await NotificationService.send(uid, 'server_crash_refund', { amount: g.stake });
+        // Only notify for actual crashes (active games), not cancelled lobbies
+        if (g.status === 'active' && stakeNum > 0) {
+          for (const uid of [g.player1_id, g.player2_id]) {
+            if (uid) await NotificationService.send(uid, 'server_crash_refund', { amount: g.stake });
+          }
+          logger.warn(`Crash recovered: game=${g.id} stake=${g.stake}`);
+        } else {
+          logger.info(`Lobby cancelled on restart: game=${g.id}`);
         }
-        logger.warn(`Crash recovered: game=${g.id} status=${g.status}`);
       } catch (err) {
         await client.query('ROLLBACK');
         logger.error(`Recovery failed game=${g.id}: ${(err as Error).message}`);
