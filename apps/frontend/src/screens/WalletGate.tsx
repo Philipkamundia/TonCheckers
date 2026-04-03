@@ -25,11 +25,6 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
   }, [wallet]);
 
   function openWalletModal() {
-    // Request tonProof so the wallet signs a challenge on connect (enables new user registration)
-    tonConnectUI.setConnectRequestParameters({
-      state: 'ready',
-      value: { tonProof: `checkers-${Date.now()}` },
-    });
     tonConnectUI.openModal();
   }
 
@@ -47,13 +42,9 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
     setError(null);
     try {
       const address = connectedWallet.account.address;
-      const proof   = connectedWallet.connectItems?.tonProof;
-      let res;
-      if (proof && 'proof' in proof) {
-        res = await authApi.connect({ walletAddress: address, proof: proof.proof, initData: currentInitData });
-      } else {
-        res = await authApi.verify({ walletAddress: address, initData: currentInitData });
-      }
+      // Always use verify — initData is signed by Telegram and sufficient for auth.
+      // tonProof is unreliable across wallet types (Telegram Wallet W5 fails proof verification).
+      const res = await authApi.verify({ walletAddress: address, initData: currentInitData });
       setTokens(res.data.accessToken, res.data.refreshToken);
       setUser(res.data.user);
       haptic.success();
