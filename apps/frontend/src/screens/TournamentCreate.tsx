@@ -15,7 +15,7 @@ export function TournamentCreate() {
 
   useEffect(() => { return showBackButton(() => navigate('/tournaments')); }, []);
   useEffect(() => {
-    const valid = name.length >= 3 && parseFloat(entryFee) >= 0 && startsAt;
+    const valid = name.length >= 3 && parseFloat(entryFee) >= 0 && startsAt && new Date(startsAt) > new Date();
     return showMainButton('Create Tournament', handleCreate, { disabled: !valid });
   }, [name, entryFee, startsAt]);
 
@@ -23,7 +23,10 @@ export function TournamentCreate() {
     setError(null);
     setMainButtonLoading(true);
     try {
-      const r = await tournamentApi.create({ name, bracketSize, entryFee, startsAt });
+      // Convert local datetime to UTC ISO string so the backend stores the correct time
+      // regardless of the user's timezone
+      const startsAtUtc = new Date(startsAt).toISOString();
+      const r = await tournamentApi.create({ name, bracketSize, entryFee, startsAt: startsAtUtc });
       haptic.success();
       navigate(`/tournaments/${r.data.tournament.id}`);
     } catch (e: unknown) {
@@ -52,7 +55,14 @@ export function TournamentCreate() {
       <input style={styles.input} type="number" placeholder="0.00" value={entryFee} onChange={e => setEntryFee(e.target.value)} min="0" step="0.1" />
 
       <p style={styles.label}>Start Date & Time</p>
-      <input style={styles.input} type="datetime-local" value={startsAt} onChange={e => setStartsAt(e.target.value)} />
+      <input
+        style={styles.input}
+        type="datetime-local"
+        value={startsAt}
+        min={new Date(Date.now() + 5 * 60_000).toISOString().slice(0, 16)}
+        onChange={e => setStartsAt(e.target.value)}
+      />
+      <p style={styles.tzHint}>🕐 Your timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}</p>
 
       {entryFee && bracketSize && (
         <div style={styles.preview}>
@@ -77,5 +87,6 @@ const styles: Record<string, React.CSSProperties> = {
   sizeBtnActive:{ background:'#2AABEE', color:'#fff' },
   preview:      { background:'var(--tg-theme-secondary-bg-color)', borderRadius:12, padding:14, marginTop:16 },
   previewText:  { color:'var(--tg-theme-text-color)', fontSize:14, margin:'3px 0' },
+  tzHint:       { color:'var(--tg-theme-hint-color)', fontSize:11, margin:'3px 0 0' },
   error:        { color:'var(--tg-theme-destructive-text-color)', fontSize:13, marginTop:8 },
 };

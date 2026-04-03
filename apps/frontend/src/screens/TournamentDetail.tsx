@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
+import { useWebSocket } from '../hooks/useWebSocket';
 import { tournamentApi } from '../services/api';
 
 interface Match { round: number; matchNumber: number; player1Id: string | null; player2Id: string | null; winnerId: string | null; isBye: boolean; }
@@ -15,6 +16,7 @@ interface TournamentDetail {
 export function TournamentDetail() {
   const { id } = useParams<{ id: string }>();
   const { showBackButton, showMainButton, hideMainButton, setMainButtonLoading, haptic } = useTelegram();
+  const { on } = useWebSocket();
   const navigate = useNavigate();
 
   const [tournament, setTournament] = useState<TournamentDetail | null>(null);
@@ -26,6 +28,30 @@ export function TournamentDetail() {
   useEffect(() => {
     tournamentApi.get(id!).then(r => setTournament(r.data.tournament)).catch(() => null);
   }, [id]);
+
+  // Live updates — refresh bracket on match ready, handle cancellation
+  useEffect(() => {
+    const unsubs = [
+      on<{ tournamentId: string }>('tournament.match_ready', ({ tournamentId }) => {
+        if (tournamentId === id) {
+          tournamentApi.get(id!).then(r => setTournament(r.data.tournament)).catch(() => null);
+        }
+      }),
+      on<{ tournamentId: string; reason: string }>('tournament.cancelled', ({ tournamentId, reason }) => {
+        if (tournamentId === id) {
+          setError(`Tournament cancelled: ${reason}`);
+          setTournament(prev => prev ? { ...prev, status: 'cancelled' } : prev);
+          hideMainButton();
+        }
+      }),
+      on<{ tournamentId: string }>('tournament.completed', ({ tournamentId }) => {
+        if (tournamentId === id) {
+          tournamentApi.get(id!).then(r => setTournament(r.data.tournament)).catch(() => null);
+        }
+      }),
+    ];
+    return () => unsubs.forEach(u => u());
+  }, [on, id]);
 
   useEffect(() => {
     if (!tournament || tournament.status !== 'open' || joined) { hideMainButton(); return; }
@@ -49,6 +75,13 @@ export function TournamentDetail() {
 
   if (!tournament) return <div style={styles.loading}>Loading…</div>;
 
+  const bracketSize  = tournament.bracketSize;
+  const startsAt     = tournament.startsAt ?? (tournament as any).starts_at;
+  const startsDate   = startsAt ? new Date(startsAt) : null;
+  const startsLabel  = startsDate && !isNaN(startsDate.getTime())
+    ? startsDate.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+    : null;
+
   const maxRound = Math.max(...tournament.matches.map(m => m.round), 1);
 
   return (
@@ -56,13 +89,13 @@ export function TournamentDetail() {
       <h2 style={styles.title}>{tournament.name}</h2>
 
       <div style={styles.infoRow}>
-        <Stat label="Players" value={`${tournament.participants.length}/${tournament.bracketSize}`} />
+        <Stat label="Players" value={`${tournament.participants.length}/${bracketSize}`} />
         <Stat label="Entry"   value={`${parseFloat(tournament.entryFee).toFixed(2)} TON`} />
         <Stat label="Prize"   value={`${parseFloat(tournament.prizePool).toFixed(2)} TON`} />
       </div>
 
-      {tournament.status === 'open' && (
-        <p style={styles.starts}>Starts {new Date(tournament.startsAt).toLocaleString()}</p>
+      {tournament.status === 'open' && startsLabel && (
+        <p style={styles.starts}>Starts {startsLabel}</p>
       )}
 
       {error && <p style={styles.error}>{error}</p>}

@@ -144,8 +144,18 @@ export class TournamentService {
 
   static async getTournamentDetail(tournamentId: string) {
     const { rows: [t] } = await pool.query(
-      `SELECT t.*, t.entry_fee::text AS "entryFee", t.prize_pool::text AS "prizePool",
-              u.username AS "creatorUsername"
+      `SELECT t.id, t.name, t.status,
+              t.bracket_size      AS "bracketSize",
+              t.entry_fee::text   AS "entryFee",
+              t.prize_pool::text  AS "prizePool",
+              t.current_round     AS "currentRound",
+              t.starts_at         AS "startsAt",
+              t.started_at        AS "startedAt",
+              t.completed_at      AS "completedAt",
+              t.winner_id         AS "winnerId",
+              t.creator_id        AS "creatorId",
+              t.created_at        AS "createdAt",
+              u.username          AS "creatorUsername"
        FROM tournaments t JOIN users u ON u.id=t.creator_id WHERE t.id=$1`,
       [tournamentId],
     );
@@ -191,7 +201,7 @@ export class TournamentService {
 
     // PRD §9: 0 or 1 participants → cancel, refund all
     if (participants.length <= 1) {
-      await TournamentService.cancelTournament(tournamentId, 'Insufficient participants');
+      await TournamentService.cancelTournament(tournamentId, 'Insufficient participants', io);
       return;
     }
 
@@ -299,16 +309,19 @@ export class TournamentService {
       );
       matchRound = match.round;
 
-      // Update participant
+      // Update participant — advance winner, eliminate loser
       await client.query(
         `UPDATE tournament_participants SET current_round=current_round+1
          WHERE tournament_id=$1 AND user_id=$2`,
         [tournamentId, winnerId],
       );
+
+      // Eliminate the loser — the other player in this match who is not the winner
       await client.query(
-        // Loser is eliminated
         `UPDATE tournament_participants SET is_eliminated=true
-         WHERE tournament_id=$1 AND user_id != $2
+         WHERE tournament_id=$1
+           AND is_eliminated=false
+           AND user_id != $2
            AND user_id IN (
              SELECT player1_id FROM tournament_matches WHERE id=$3
              UNION
@@ -423,12 +436,15 @@ export class TournamentService {
     try {
       await client.query('BEGIN');
 
-      await client.query(
+      // Guard: only finalize if still in_progress — prevents double-execution
+      const { rowCount } = await client.query(
         `UPDATE tournaments SET status='completed', winner_id=$1,
            winner_payout=$2, creator_payout=$3, platform_fee=$4,
-           completed_at=NOW(), updated_at=NOW() WHERE id=$5`,
+           completed_at=NOW(), updated_at=NOW()
+         WHERE id=$5 AND status='in_progress'`,
         [winnerId, winnerPayout, creatorPayout, platformFee, tournamentId],
       );
+      if (!rowCount) { await client.query('ROLLBACK'); return; }
 
       // Credit winner
       await client.query(
@@ -475,16 +491,15 @@ export class TournamentService {
 
   // ─── Cancel ───────────────────────────────────────────────────────────────
 
-  static async cancelTournament(tournamentId: string, reason: string): Promise<void> {
+  static async cancelTournament(tournamentId: string, reason: string, io?: Server): Promise<void> {
     const { rows: [t] } = await pool.query(
-      `SELECT entry_fee::text AS "entryFee" FROM tournaments WHERE id=$1`, [tournamentId],
+      `SELECT entry_fee::text AS "entryFee", name FROM tournaments WHERE id=$1`, [tournamentId],
     );
 
     await pool.query(
       `UPDATE tournaments SET status='cancelled', updated_at=NOW() WHERE id=$1`, [tournamentId],
     );
 
-    // Refund all entry fees
     const { rows: participants } = await pool.query(
       'SELECT user_id AS "userId" FROM tournament_participants WHERE tournament_id=$1',
       [tournamentId],
@@ -494,6 +509,9 @@ export class TournamentService {
       if (parseFloat(t.entryFee) > 0) {
         await BalanceService.creditBalance(p.userId, t.entryFee);
       }
+      io?.to(`user:${p.userId}`).emit('tournament.cancelled', {
+        tournamentId, reason, refunded: t.entryFee,
+      });
     }
 
     logger.info(`Tournament cancelled: ${tournamentId} reason=${reason} refunded=${participants.length} players`);
