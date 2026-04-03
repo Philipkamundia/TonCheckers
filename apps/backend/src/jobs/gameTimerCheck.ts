@@ -29,6 +29,7 @@ export function startTimerCheckJob(io: Server): ReturnType<typeof setInterval> {
           gameId, winnerId, loserId, 'timeout', game.stake, io,
         );
 
+        io.to(`game:${gameId}`).emit('game.tick', { gameId, remainingMs: 0 });
         io.to(`game:${gameId}`).emit('game.end', {
           gameId,
           result:        'win',
@@ -44,7 +45,6 @@ export function startTimerCheckJob(io: Server): ReturnType<typeof setInterval> {
           eloChanges:    result.eloChanges,
         });
 
-        io.to(`game:${gameId}`).emit('game.tick', { gameId, remainingMs: 0 });
         GameRoomManager.remove(gameId);
         logger.info(`Timeout: game=${gameId} timedOut=player${timedOutPlayer}`);
       }

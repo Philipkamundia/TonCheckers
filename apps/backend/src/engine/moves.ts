@@ -74,7 +74,7 @@ function getCaptureChains(
 
   for (const [dr, dc] of ALL_DIRECTIONS) {
     if (isKingPiece) {
-      // Flying king: scan along diagonal to find an opponent piece to jump
+      // King capture: scan along diagonal to find an opponent piece to jump
       let scanRow = row + dr;
       let scanCol = col + dc;
 
@@ -84,46 +84,42 @@ function getCaptureChains(
         scanCol += dc;
       }
 
-      // Must land on an opponent piece that hasn't been captured yet
+      // Must be an opponent piece that hasn't been captured yet
       if (!inBounds(scanRow, scanCol)) continue;
       const midKey = `${scanRow},${scanCol}`;
       if (captured.has(midKey)) continue;
       if (!isOpponentPiece(board[scanRow][scanCol], player)) continue;
 
-      // Can land on any empty square past the captured piece
-      let landRow = scanRow + dr;
-      let landCol = scanCol + dc;
-      while (inBounds(landRow, landCol) && board[landRow][landCol] === EMPTY) {
-        const newCaptured = new Set(captured);
-        newCaptured.add(midKey);
+      // King must land on the single adjacent square immediately after the captured piece
+      const landRow = scanRow + dr;
+      const landCol = scanCol + dc;
+      if (!inBounds(landRow, landCol) || board[landRow][landCol] !== EMPTY) continue;
 
-        const tempBoard = cloneBoard(board);
-        tempBoard[scanRow][scanCol] = EMPTY;
-        tempBoard[landRow][landCol] = tempBoard[row][col];
-        tempBoard[row][col] = EMPTY;
-        // No promotion mid-chain
+      const newCaptured = new Set(captured);
+      newCaptured.add(midKey);
 
-        const continuations = getCaptureChains(
-          tempBoard, landRow, landCol, player, newCaptured, chainStart, true,
-        );
+      const tempBoard = cloneBoard(board);
+      tempBoard[scanRow][scanCol] = EMPTY;
+      tempBoard[landRow][landCol] = tempBoard[row][col];
+      tempBoard[row][col] = EMPTY;
 
-        if (continuations.length > 0) {
-          results.push(...continuations);
-        } else {
-          const allCaptures = Array.from(newCaptured).map(k => {
-            const [r, c] = k.split(',').map(Number);
-            return { row: r, col: c };
-          });
-          results.push({
-            from:     chainStart,
-            to:       { row: landRow, col: landCol },
-            captures: allCaptures,
-            isChain:  newCaptured.size > 1,
-          });
-        }
+      const continuations = getCaptureChains(
+        tempBoard, landRow, landCol, player, newCaptured, chainStart, true,
+      );
 
-        landRow += dr;
-        landCol += dc;
+      if (continuations.length > 0) {
+        results.push(...continuations);
+      } else {
+        const allCaptures = Array.from(newCaptured).map(k => {
+          const [r, c] = k.split(',').map(Number);
+          return { row: r, col: c };
+        });
+        results.push({
+          from:     chainStart,
+          to:       { row: landRow, col: landCol },
+          captures: allCaptures,
+          isChain:  newCaptured.size > 1,
+        });
       }
     } else {
       // Regular piece: jump exactly 2 squares

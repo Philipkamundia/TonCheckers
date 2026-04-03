@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { adminController } from '../controllers/admin.controller.js';
 import { requireAdmin } from '../middleware/requireAdmin.js';
 import { requireAuth } from '../middleware/auth.js';
+import { adminRateLimit } from '../middleware/rateLimit.js';
 import { handleAdminBotWebhook } from '../notifications/botService.js';
 
 export const adminRouter = Router();
@@ -28,8 +29,8 @@ adminRouter.post('/bot-webhook', async (req, res, next) => {
   }
 });
 
-// All other admin routes require both JWT auth AND treasury wallet signature
-adminRouter.use(requireAuth, requireAdmin);
+// All other admin routes require rate limit + JWT auth + wallet + passcode
+adminRouter.use(adminRateLimit, requireAuth, requireAdmin);
 
 // Summary
 adminRouter.get('/summary',                    adminController.getSummary);

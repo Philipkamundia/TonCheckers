@@ -3,11 +3,12 @@
  * Client is render-only — all moves validated server-side.
  * Resign button available at any point.
  */
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
 import { useStore } from '../store';
 import { useGame, type Board } from '../hooks/useGame';
+import { getAvailableMoves } from '../engine/moves';
 import { PostGame } from './PostGame';
 
 const CELL_SIZE = Math.floor((Math.min(window.innerWidth, 400) - 32) / 8);
@@ -28,6 +29,25 @@ export function GameRoom() {
     gameState, selectedPiece, setSelectedPiece, invalidMove, makeMove, resign,
   } = useGame(gameId ?? null, myPlayerNum);
 
+  // Compute legal moves for highlighting — same engine as AI game
+  const legalMoves = useMemo(() => {
+    if (!gameState.board || gameState.activePlayer !== myPlayerNum) return [];
+    return getAvailableMoves(gameState.board as any, myPlayerNum);
+  }, [gameState.board, gameState.activePlayer, myPlayerNum]);
+
+  const movablePieces = useMemo(() =>
+    new Set(legalMoves.map(m => `${m.from.row},${m.from.col}`)),
+  [legalMoves]);
+
+  const validDests = useMemo(() => {
+    if (!selectedPiece) return new Set<string>();
+    return new Set(
+      legalMoves
+        .filter(m => m.from.row === selectedPiece.row && m.from.col === selectedPiece.col)
+        .map(m => `${m.to.row},${m.to.col}`)
+    );
+  }, [selectedPiece, legalMoves]);
+
   // Hide back button during game — resign to exit (PRD §16: no custom back)
   useEffect(() => {
     return showBackButton(() => {
@@ -40,23 +60,35 @@ export function GameRoom() {
     return <PostGame gameId={gameId!} result={gameState.result} myPlayerNum={myPlayerNum} />;
   }
 
+  // Don't render board until we know which player we are — prevents one-frame flip
+  if (!myPlayerNum) {
+    return (
+      <div style={{ ...styles.container, justifyContent: 'center' }}>
+        <p style={{ color: 'var(--tg-theme-hint-color)' }}>Connecting…</p>
+      </div>
+    );
+  }
+
   const isMyTurn    = gameState.activePlayer === myPlayerNum;
   const remainingSecs = Math.ceil((gameState.remainingMs ?? 0) / 1000);
   const timerColor   = remainingSecs <= 5 ? '#E53935' : 'var(--tg-theme-text-color)'; // PRD §6: red at 5s
 
   function handleCellPress(row: number, col: number) {
     if (!isMyTurn || !gameState.board) return;
-    const cell = gameState.board[row][col];
+    const key = `${row},${col}`;
 
     if (selectedPiece) {
-      // Attempt move
       if (selectedPiece.row === row && selectedPiece.col === col) {
-        setSelectedPiece(null); // Deselect
-      } else {
+        setSelectedPiece(null);
+      } else if (validDests.has(key)) {
         makeMove(selectedPiece, { row, col });
+      } else if (movablePieces.has(key)) {
+        setSelectedPiece({ row, col });
+        haptic.selection();
+      } else {
+        setSelectedPiece(null);
       }
-    } else if (cell === myPlayerNum || cell === myPlayerNum! + 2) {
-      // Select own piece
+    } else if (movablePieces.has(key)) {
       setSelectedPiece({ row, col });
       haptic.selection();
     }
@@ -76,7 +108,7 @@ export function GameRoom() {
 
       {/* Board */}
       <div style={{ ...styles.board, width: CELL_SIZE * 8, height: CELL_SIZE * 8 }}>
-        {gameState.board && renderBoard(gameState.board, selectedPiece, myPlayerNum, handleCellPress)}
+        {gameState.board && renderBoard(gameState.board, selectedPiece, myPlayerNum, handleCellPress, movablePieces, validDests)}
       </div>
 
       {invalidMove && <p style={styles.invalidMove}>{invalidMove}</p>}
@@ -97,30 +129,39 @@ function renderBoard(
   selected: { row: number; col: number } | null,
   myPlayerNum: 1 | 2 | null,
   onPress: (r: number, c: number) => void,
+  movablePieces: Set<string>,
+  validDests: Set<string>,
 ) {
-  // Flip board for player 2 so their pieces are at the bottom
   const rows = myPlayerNum === 2 ? [...Array(8).keys()].reverse() : [...Array(8).keys()];
 
   return rows.flatMap(row =>
     [...Array(8).keys()].map(col => {
-      const isDark      = (row + col) % 2 !== 0;
-      const piece       = board[row][col];
-      const isSelected  = selected?.row === row && selected?.col === col;
+      const isDark     = (row + col) % 2 !== 0;
+      const piece      = board[row][col];
+      const isSelected = selected?.row === row && selected?.col === col;
+      const key        = `${row},${col}`;
+      const isDest     = validDests.has(key);
+      const canMove    = movablePieces.has(key);
+
+      let bg = isDark ? '#795548' : '#EFEBE9';
+      if (isSelected)       bg = '#FFF9C4';
+      else if (isDest)      bg = '#A5D6A7';
+      else if (isDark && canMove && !selected) bg = '#8D6E63';
 
       return (
         <div
           key={`${row}-${col}`}
           style={{
-            position:        'absolute',
-            left:            col * CELL_SIZE,
-            top:             (myPlayerNum === 2 ? (7 - row) : row) * CELL_SIZE,
-            width:           CELL_SIZE,
-            height:          CELL_SIZE,
-            background:      isSelected ? '#FFF9C4' : (isDark ? '#795548' : '#EFEBE9'),
-            display:         'flex',
-            alignItems:      'center',
-            justifyContent:  'center',
-            cursor:          'pointer',
+            position:       'absolute',
+            left:           col * CELL_SIZE,
+            top:            (myPlayerNum === 2 ? (7 - row) : row) * CELL_SIZE,
+            width:          CELL_SIZE,
+            height:         CELL_SIZE,
+            background:     bg,
+            display:        'flex',
+            alignItems:     'center',
+            justifyContent: 'center',
+            cursor:         (isSelected || isDest || canMove) ? 'pointer' : 'default',
           }}
           onClick={() => onPress(row, col)}
         >
@@ -132,7 +173,11 @@ function renderBoard(
               background:   PIECE_COLORS[piece],
               border:       piece >= 3 ? '3px solid gold' : 'none',
               boxShadow:    '0 2px 4px rgba(0,0,0,0.3)',
+              outline:      canMove ? '2px solid rgba(255,255,255,0.5)' : 'none',
             }} />
+          )}
+          {isDest && piece === 0 && (
+            <div style={{ width: CELL_SIZE * 0.3, height: CELL_SIZE * 0.3, borderRadius: '50%', background: 'rgba(76,175,80,0.7)' }} />
           )}
         </div>
       );

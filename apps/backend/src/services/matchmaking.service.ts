@@ -50,16 +50,24 @@ export class MatchmakingService {
     await BalanceService.lockBalance(userId, stake);
 
     const now = Date.now();
-    await Promise.all([
-      redis.zadd(QUEUE_KEY, now, userId),
-      redis.hset(`${ENTRY_PREFIX}${userId}`, { userId, elo: user.elo, stake, joinedAt: now }),
-    ]);
+    try {
+      await Promise.all([
+        redis.zadd(QUEUE_KEY, now, userId),
+        redis.hset(`${ENTRY_PREFIX}${userId}`, { userId, elo: user.elo, stake, joinedAt: now }),
+      ]);
 
-    await pool.query(
-      `INSERT INTO matchmaking_queue (user_id, elo, stake, status) VALUES ($1,$2,$3,'waiting')
-       ON CONFLICT (user_id) WHERE status = 'waiting' DO NOTHING`,
-      [userId, user.elo, stake],
-    );
+      await pool.query(
+        `INSERT INTO matchmaking_queue (user_id, elo, stake, status) VALUES ($1,$2,$3,'waiting')
+         ON CONFLICT (user_id) WHERE status = 'waiting' DO NOTHING`,
+        [userId, user.elo, stake],
+      );
+    } catch (err) {
+      // Redis/DB failed after lock — refund immediately
+      await BalanceService.unlockBalance(userId, stake).catch(e =>
+        logger.error(`Queue join refund failed user=${userId}: ${(e as Error).message}`),
+      );
+      throw err;
+    }
 
     logger.info(`Queue join: user=${userId} elo=${user.elo} stake=${stake}`);
   }

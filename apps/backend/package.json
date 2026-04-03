@@ -9,6 +9,7 @@
     "start":   "node dist/src/index.js",
     "migrate": "tsx scripts/migrate.ts",
     "seed":    "tsx scripts/seed.ts",
+    "reset":   "tsx scripts/reset-db.ts",
     "lint":    "eslint src --ext .ts --report-unused-disable-directives --max-warnings 0",
     "test":    "vitest run",
     "clean":   "rimraf dist"

@@ -31,6 +31,7 @@ const activeLobbies = new Map<string, {
   player2Id: string;
   resolvedStake: string;
   timeoutId: ReturnType<typeof setTimeout>;
+  tickInterval: ReturnType<typeof setInterval>;
 }>();
 
 export function startMatchmakingScan(io: Server): ReturnType<typeof setInterval> {
@@ -91,12 +92,24 @@ async function runScan(io: Server): Promise<void> {
         ]);
 
         // Create game record in DB (status: waiting — not started yet)
-        // Insert directly as waiting to avoid a two-query race window
-        const gameRecord = await GameService.createGame(
-          seeker.userId, match.userId, resolvedStake,
-          seeker.elo, match.elo, initialGameState(),
-          pool, 'waiting',
-        );
+        let gameRecord;
+        try {
+          gameRecord = await GameService.createGame(
+            seeker.userId, match.userId, resolvedStake,
+            seeker.elo, match.elo, initialGameState(),
+            pool, 'waiting',
+          );
+        } catch (err) {
+          // Game creation failed — refund both players and re-add to queue
+          logger.error(`Game creation failed, refunding: ${(err as Error).message}`);
+          await Promise.allSettled([
+            BalanceService.unlockBalance(seeker.userId, resolvedStake),
+            BalanceService.unlockBalance(match.userId, resolvedStake),
+          ]);
+          io.to(`user:${seeker.userId}`).emit('mm.error', { reason: 'Game creation failed, stake returned' });
+          io.to(`user:${match.userId}`).emit('mm.error', { reason: 'Game creation failed, stake returned' });
+          continue;
+        }
 
         paired.add(seeker.userId);
         paired.add(match.userId);
@@ -177,7 +190,6 @@ function startLobbyCountdown(
   const timeoutId = setTimeout(async () => {
     clearInterval(tickInterval);
     activeLobbies.delete(gameId);
-
     try {
       // Check neither player cancelled during countdown
       const cancelKey = `${COUNTDOWN_CANCEL_KEY}${gameId}`;
@@ -215,7 +227,7 @@ function startLobbyCountdown(
     }
   }, LOBBY_COUNTDOWN_MS);
 
-  activeLobbies.set(gameId, { player1Id, player2Id, resolvedStake: stake, timeoutId });
+  activeLobbies.set(gameId, { player1Id, player2Id, resolvedStake: stake, timeoutId, tickInterval });
 }
 
 /**
@@ -234,6 +246,7 @@ export async function cancelLobby(
   await redis.set(`${COUNTDOWN_CANCEL_KEY}${gameId}`, cancellingUserId, 'PX', 15_000);
 
   clearTimeout(lobby.timeoutId);
+  clearInterval(lobby.tickInterval);
   activeLobbies.delete(gameId);
 
   // Cancel game record

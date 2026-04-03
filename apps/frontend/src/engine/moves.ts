@@ -53,15 +53,14 @@ function captureChains(
       if (!inBounds(sr,sc)) continue;
       const mk = `${sr},${sc}`;
       if (captured.has(mk) || !isOpp(board[sr][sc], player)) continue;
-      let lr=sr+dr, lc=sc+dc;
-      while (inBounds(lr,lc) && board[lr][lc] === EMPTY) {
-        const nc2 = new Set(captured); nc2.add(mk);
-        const tb = clone(board); tb[sr][sc]=EMPTY; tb[lr][lc]=tb[row][col]; tb[row][col]=EMPTY;
-        const cont = captureChains(tb,lr,lc,player,nc2,start,true);
-        if (cont.length) results.push(...cont);
-        else results.push({ from:start, to:{row:lr,col:lc}, captures:Array.from(nc2).map(k=>{const[r,c]=k.split(',').map(Number);return{row:r,col:c};}) });
-        lr+=dr; lc+=dc;
-      }
+      // Land on single adjacent square immediately after captured piece
+      const lr=sr+dr, lc=sc+dc;
+      if (!inBounds(lr,lc) || board[lr][lc] !== EMPTY) continue;
+      const nc2 = new Set(captured); nc2.add(mk);
+      const tb = clone(board); tb[sr][sc]=EMPTY; tb[lr][lc]=tb[row][col]; tb[row][col]=EMPTY;
+      const cont = captureChains(tb,lr,lc,player,nc2,start,true);
+      if (cont.length) results.push(...cont);
+      else results.push({ from:start, to:{row:lr,col:lc}, captures:Array.from(nc2).map(k=>{const[r,c]=k.split(',').map(Number);return{row:r,col:c};}) });
     } else {
       const mr=row+dr, mc=col+dc, lr=row+2*dr, lc=col+2*dc;
       if (!inBounds(lr,lc) || board[lr][lc]!==EMPTY) continue;
