@@ -217,7 +217,7 @@ export class WithdrawalService {
       throw new Error(`TON API error getting seqno (network=${network} endpoint=${endpoint}): ${msg}`);
     }
 
-    const { Address, toNano } = await import('@ton/core');
+    const { Address, toNano, SendMode } = await import('@ton/core');
     const toAddress  = Address.parse(destination);
     const nanoAmount = toNano(amount);
 
@@ -225,9 +225,8 @@ export class WithdrawalService {
       await contract.sendTransfer({
         seqno,
         secretKey: keyPair.secretKey,
-        messages: [
-          internal({ to: toAddress, value: nanoAmount, body: 'CheckTON withdrawal' }),
-        ],
+        sendMode:  SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
+        messages:  [internal({ to: toAddress, value: nanoAmount, body: 'CheckTON withdrawal' })],
       });
     } catch (err) {
       const msg = (err as Error).message;
