@@ -57,6 +57,11 @@ export function PvpLobby() {
         haptic.warning();
         setError(`Stake adjusted to ${data.resolvedStake} TON (opponent had lower stake)`);
       }),
+      on<{ reason: string }>('mm.error', ({ reason }) => {
+        setInQueue(false);
+        setError(reason);
+        haptic.error();
+      }),
     ];
     return () => unsubs.forEach(u => u());
   }, [on]);

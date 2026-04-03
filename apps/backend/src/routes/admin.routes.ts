@@ -29,8 +29,8 @@ adminRouter.post('/bot-webhook', async (req, res, next) => {
   }
 });
 
-// All other admin routes require rate limit + JWT auth + wallet + passcode
-adminRouter.use(adminRateLimit, requireAuth, requireAdmin);
+// All other admin routes require rate limit + wallet + passcode (no game JWT needed)
+adminRouter.use(adminRateLimit, requireAdmin);
 
 // Summary
 adminRouter.get('/summary',                    adminController.getSummary);

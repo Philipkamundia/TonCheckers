@@ -44,6 +44,14 @@ export function AdminDashboard() {
 
   const authed = step === 'dashboard';
 
+  // Clear admin headers when component unmounts (navigating away from admin)
+  useEffect(() => {
+    return () => {
+      delete api.defaults.headers.common['X-Admin-Wallet'];
+      delete api.defaults.headers.common['X-Admin-Passcode'];
+    };
+  }, []);
+
   // When wallet connects, move to passcode step automatically
   useEffect(() => {
     if (wallet && step === 'wallet') setStep('passcode');

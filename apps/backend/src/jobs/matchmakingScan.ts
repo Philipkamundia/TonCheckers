@@ -240,29 +240,57 @@ export async function cancelLobby(
   cancellingUserId: string,
 ): Promise<void> {
   const lobby = activeLobbies.get(gameId);
-  if (!lobby) throw new Error('Lobby not found or already started');
+  if (!lobby) {
+    // Lobby already started or doesn't exist — check if game is still waiting
+    const { rows: [game] } = await pool.query(
+      `SELECT status FROM games WHERE id=$1`, [gameId],
+    );
+    if (!game || game.status !== 'waiting') {
+      // Game already active — can't cancel, ignore silently
+      return;
+    }
+    // Game is waiting but lobby not in memory (server restart?) — cancel it
+  } else {
+    clearTimeout(lobby.timeoutId);
+    clearInterval(lobby.tickInterval);
+    activeLobbies.delete(gameId);
+  }
 
   // Set cancel flag in Redis (checked when countdown fires)
   await redis.set(`${COUNTDOWN_CANCEL_KEY}${gameId}`, cancellingUserId, 'PX', 15_000);
 
-  clearTimeout(lobby.timeoutId);
-  clearInterval(lobby.tickInterval);
-  activeLobbies.delete(gameId);
-
   // Cancel game record
   await pool.query(
-    `UPDATE games SET status='cancelled', updated_at=NOW() WHERE id=$1`, [gameId],
+    `UPDATE games SET status='cancelled', updated_at=NOW() WHERE id=$1 AND status='waiting'`,
+    [gameId],
   );
 
   // Unlock stakes for both players
-  await Promise.all([
-    BalanceService.unlockBalance(lobby.player1Id, lobby.resolvedStake),
-    BalanceService.unlockBalance(lobby.player2Id,  lobby.resolvedStake),
-  ]);
+  const player1Id = lobby?.player1Id;
+  const player2Id = lobby?.player2Id;
+  const resolvedStake = lobby?.resolvedStake;
 
-  // Notify both
-  io.to(`user:${lobby.player1Id}`).emit('mm.cancelled', { gameId, cancelledBy: cancellingUserId });
-  io.to(`user:${lobby.player2Id}`).emit('mm.cancelled', { gameId, cancelledBy: cancellingUserId });
+  if (player1Id && player2Id && resolvedStake) {
+    await Promise.all([
+      BalanceService.unlockBalance(player1Id, resolvedStake),
+      BalanceService.unlockBalance(player2Id, resolvedStake),
+    ]);
+    io.to(`user:${player1Id}`).emit('mm.cancelled', { gameId, cancelledBy: cancellingUserId });
+    io.to(`user:${player2Id}`).emit('mm.cancelled', { gameId, cancelledBy: cancellingUserId });
+  } else {
+    // Fallback: look up players from DB
+    const { rows: [game] } = await pool.query(
+      `SELECT player1_id, player2_id, stake::text FROM games WHERE id=$1`, [gameId],
+    );
+    if (game) {
+      await Promise.allSettled([
+        BalanceService.unlockBalance(game.player1_id, game.stake),
+        BalanceService.unlockBalance(game.player2_id, game.stake),
+      ]);
+      io.to(`user:${game.player1_id}`).emit('mm.cancelled', { gameId, cancelledBy: cancellingUserId });
+      io.to(`user:${game.player2_id}`).emit('mm.cancelled', { gameId, cancelledBy: cancellingUserId });
+    }
+  }
 
   logger.info(`Lobby cancelled: game=${gameId} by=${cancellingUserId}`);
 }
