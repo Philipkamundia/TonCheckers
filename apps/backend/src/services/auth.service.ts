@@ -147,17 +147,37 @@ export class AuthService {
         return false;
       }
       const stateInitBuf = Buffer.from(proof.stateInit, 'base64');
-      // Public key is the last 32 bytes of the stateInit data cell for standard wallet contracts
       if (stateInitBuf.length < 32) {
-        logger.warn(`stateInit too short for ${walletAddress}`);
+        logger.warn(`stateInit too short (${stateInitBuf.length} bytes) for ${walletAddress}`);
         return false;
       }
-      const pubKey = stateInitBuf.slice(-32);
+
+      // Try to extract public key using @ton/core Cell parsing first (most reliable)
+      // Falls back to last-32-bytes heuristic if parsing fails
+      let pubKey: Buffer;
+      try {
+        const { Cell } = await import('@ton/core');
+        const cell  = Cell.fromBoc(stateInitBuf)[0];
+        const slice = cell.beginParse();
+        slice.loadBits(2); // split_depth + special
+        slice.loadMaybeRef(); // code ref
+        const dataRef = slice.loadMaybeRef();
+        if (dataRef) {
+          const data = dataRef.beginParse();
+          data.loadUint(32); // seqno or subwallet_id
+          pubKey = Buffer.from(data.loadBuffer(32));
+        } else {
+          pubKey = stateInitBuf.slice(-32);
+        }
+      } catch {
+        // Fallback: last 32 bytes
+        pubKey = stateInitBuf.slice(-32);
+      }
 
       const { signVerify } = await import('@ton/crypto');
       const valid = await signVerify(finalHash, sigBuf, pubKey);
       if (!valid) {
-        logger.warn(`TonConnect signature invalid for ${walletAddress}`);
+        logger.warn(`TonConnect signature invalid for ${walletAddress} — pubKey=${pubKey.toString('hex').slice(0,16)}… stateInitLen=${stateInitBuf.length}`);
         return false;
       }
 
