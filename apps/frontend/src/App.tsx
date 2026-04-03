@@ -34,7 +34,6 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 function AppRoutes() {
   const { accessToken, user } = useStore();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const postAuthPath = '/';
 
   return (
