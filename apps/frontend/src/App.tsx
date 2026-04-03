@@ -28,8 +28,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { accessToken } = useStore();
-  if (!accessToken) return <Navigate to="/connect?mode=admin" replace />;
   return <>{children}</>;
 }
 
@@ -37,17 +35,8 @@ function AppRoutes() {
   const { accessToken, user } = useStore();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-
   const mode = searchParams.get('mode');
-
-  // If admin mode param is present and user is already authed, redirect to /admin immediately
-  useEffect(() => {
-    if (mode === 'admin' && accessToken && user) {
-      navigate('/admin', { replace: true });
-    }
-  }, [mode, accessToken, user]);
-
-  const postAuthPath = mode === 'admin' ? '/admin' : '/';
+  const postAuthPath = '/';
 
   return (
     <Routes>
@@ -82,7 +71,7 @@ function AppRoutes() {
       <Route path="*" element={
         accessToken
           ? <Navigate to="/" replace />
-          : <Navigate to={mode ? `/connect?mode=${mode}` : '/connect'} replace />
+          : <Navigate to="/connect" replace />
       } />
     </Routes>
   );

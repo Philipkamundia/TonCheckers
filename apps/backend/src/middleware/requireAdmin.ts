@@ -39,13 +39,16 @@ export function requireAdmin(req: Request, _res: Response, next: NextFunction): 
     return next(new AppError(403, 'Not authorised — treasury wallet required', 'FORBIDDEN'));
   }
 
-  // Passcode check
+  // Passcode check — required, not optional
   const expectedPasscode = process.env.ADMIN_PASSCODE;
-  if (expectedPasscode) {
-    if (!adminPasscode || adminPasscode !== expectedPasscode) {
-      logger.warn(`Admin passcode incorrect for wallet: ${adminWallet}`);
-      return next(new AppError(403, 'Invalid admin passcode', 'FORBIDDEN'));
-    }
+  if (!expectedPasscode) {
+    logger.error('ADMIN_PASSCODE not configured — admin access blocked');
+    return next(new AppError(503, 'Admin access not configured', 'ADMIN_NOT_CONFIGURED'));
+  }
+
+  if (!adminPasscode || adminPasscode !== expectedPasscode) {
+    logger.warn(`Admin passcode incorrect for wallet: ${adminWallet}`);
+    return next(new AppError(403, 'Invalid admin passcode', 'FORBIDDEN'));
   }
 
   logger.info(`Admin access granted: wallet=${adminWallet}`);

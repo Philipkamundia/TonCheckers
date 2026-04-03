@@ -194,8 +194,8 @@ export class WithdrawalService {
     const words = mnemonic.trim().split(/\s+/);
     if (words.length < 12) throw new Error('HOT_WALLET_MNEMONIC appears invalid — expected 24 words');
 
-    const { TonClient, WalletContractV4, internal } = await import('@ton/ton');
-    const { mnemonicToPrivateKey }                  = await import('@ton/crypto');
+    const { TonClient, WalletContractV5R1, internal } = await import('@ton/ton');
+    const { mnemonicToPrivateKey }                    = await import('@ton/crypto');
 
     const endpoint = network === 'mainnet'
       ? 'https://toncenter.com/api/v2/jsonRPC'
@@ -203,7 +203,10 @@ export class WithdrawalService {
 
     const client  = new TonClient({ endpoint, apiKey });
     const keyPair = await mnemonicToPrivateKey(words);
-    const wallet  = WalletContractV4.create({ publicKey: keyPair.publicKey, workchain: 0 });
+
+    // W5 wallet — networkGlobalId: -3 = testnet, -239 = mainnet
+    const networkGlobalId = network === 'mainnet' ? -239 : -3;
+    const wallet   = WalletContractV5R1.create({ publicKey: keyPair.publicKey, workchain: 0, walletId: { networkGlobalId } });
     const contract = client.open(wallet);
 
     let seqno: number;

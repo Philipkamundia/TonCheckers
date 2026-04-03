@@ -32,7 +32,7 @@ const PORT       = process.env.PORT || 3001;
 app.set('trust proxy', 1);
 
 // Fail fast on missing required env vars
-const REQUIRED_ENV = ['DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'TELEGRAM_BOT_TOKEN'];
+const REQUIRED_ENV = ['DATABASE_URL', 'REDIS_URL', 'JWT_SECRET', 'JWT_REFRESH_SECRET', 'TELEGRAM_BOT_TOKEN', 'ADMIN_PASSCODE'];
 const missing = REQUIRED_ENV.filter(k => !process.env[k]);
 if (missing.length) {
   console.error(`Missing required env vars: ${missing.join(', ')}`);
