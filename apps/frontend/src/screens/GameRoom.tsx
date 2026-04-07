@@ -27,6 +27,7 @@ export function GameRoom() {
 
   const {
     gameState, selectedPiece, setSelectedPiece, invalidMove, makeMove, resign,
+    offerDraw, acceptDraw, declineDraw, drawOffer,
   } = useGame(gameId ?? null, myPlayerNum);
 
   // Compute legal moves for highlighting — same engine as AI game
@@ -113,13 +114,32 @@ export function GameRoom() {
 
       {invalidMove && <p style={styles.invalidMove}>{invalidMove}</p>}
 
-      {/* Resign button */}
-      <button style={styles.resignBtn} onClick={() => {
-        haptic.impact('heavy');
-        if (confirm('Resign this game?')) resign();
-      }}>
-        Resign
-      </button>
+      {/* Draw offer notification */}
+      {drawOffer && (
+        <div style={styles.drawOfferBox}>
+          <p style={styles.drawOfferText}>🤝 {drawOffer} offers a draw</p>
+          <div style={styles.drawOfferBtns}>
+            <button style={styles.acceptBtn} onClick={acceptDraw}>Accept</button>
+            <button style={styles.declineBtn} onClick={declineDraw}>Decline</button>
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div style={styles.actionRow}>
+        <button style={styles.offerDrawBtn} onClick={() => {
+          haptic.impact('light');
+          offerDraw();
+        }} disabled={!isMyTurn}>
+          🤝 Offer Draw
+        </button>
+        <button style={styles.resignBtn} onClick={() => {
+          haptic.impact('heavy');
+          if (confirm('Resign this game?')) resign();
+        }}>
+          🏳 Resign
+        </button>
+      </div>
     </div>
   );
 }
@@ -186,11 +206,18 @@ function renderBoard(
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container:   { padding:'16px', display:'flex', flexDirection:'column', alignItems:'center', gap:16, background:'var(--tg-theme-bg-color)', minHeight:'100vh' },
-  timerRow:    { display:'flex', justifyContent:'space-between', width:'100%', maxWidth:400 },
-  turnLabel:   { color:'var(--tg-theme-text-color)', fontSize:14 },
-  timer:       { fontSize:20, fontWeight:700 },
-  board:       { position:'relative', border:'2px solid var(--tg-theme-secondary-bg-color)', borderRadius:4 },
-  invalidMove: { color:'var(--tg-theme-destructive-text-color)', fontSize:13 },
-  resignBtn:   { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'12px 32px', color:'var(--tg-theme-destructive-text-color)', fontSize:15, cursor:'pointer' },
+  container:      { padding:'16px', display:'flex', flexDirection:'column', alignItems:'center', gap:16, background:'var(--tg-theme-bg-color)', minHeight:'100vh' },
+  timerRow:       { display:'flex', justifyContent:'space-between', width:'100%', maxWidth:400 },
+  turnLabel:      { color:'var(--tg-theme-text-color)', fontSize:14 },
+  timer:          { fontSize:20, fontWeight:700 },
+  board:          { position:'relative', border:'2px solid var(--tg-theme-secondary-bg-color)', borderRadius:4 },
+  invalidMove:    { color:'var(--tg-theme-destructive-text-color)', fontSize:13 },
+  drawOfferBox:   { background:'var(--tg-theme-secondary-bg-color)', borderRadius:14, padding:'14px 16px', width:'100%', maxWidth:400 },
+  drawOfferText:  { color:'var(--tg-theme-text-color)', fontSize:14, fontWeight:600, margin:'0 0 10px', textAlign:'center' },
+  drawOfferBtns:  { display:'flex', gap:10 },
+  acceptBtn:      { flex:1, background:'rgba(76,175,80,0.15)', border:'1px solid #4CAF50', borderRadius:10, padding:'10px', color:'#4CAF50', fontSize:14, fontWeight:600, cursor:'pointer' },
+  declineBtn:     { flex:1, background:'rgba(229,57,53,0.1)', border:'1px solid #E53935', borderRadius:10, padding:'10px', color:'#E53935', fontSize:14, fontWeight:600, cursor:'pointer' },
+  actionRow:      { display:'flex', gap:12, width:'100%', maxWidth:400 },
+  offerDrawBtn:   { flex:1, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'12px', color:'var(--tg-theme-text-color)', fontSize:14, cursor:'pointer' },
+  resignBtn:      { flex:1, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'12px', color:'var(--tg-theme-destructive-text-color)', fontSize:14, cursor:'pointer' },
 };

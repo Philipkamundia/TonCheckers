@@ -1,7 +1,7 @@
 /**
  * AiGameRoom.tsx — AI practice game (PRD §8)
  */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -26,7 +26,10 @@ export function AiGameRoom() {
   const [invalid,    setInvalid]    = useState<string | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [tip,        setTip]        = useState<{ from: { row: number; col: number }; to: { row: number; col: number } } | null>(null);
-  const [aiPiece,    setAiPiece]    = useState<{ from: { row: number; col: number }; to: { row: number; col: number } } | null>(null);
+  const [aiPiece,    setAiPiece]    = useState<{ from: { row: number; col: number }; to: { row: number; col: number }; pieceType: number } | null>(null);
+  const [humanPiece, setHumanPiece] = useState<{ from: { row: number; col: number }; to: { row: number; col: number }; pieceType: number } | null>(null);
+  const [animating,  setAnimating]  = useState(false);
+  const prevBoardRef = useRef<Board | null>(null);
 
   // Client-side countdown — ticks every second when it's the human's turn
   useEffect(() => {
@@ -53,14 +56,19 @@ export function AiGameRoom() {
 
   useEffect(() => {
     const unsubs = [
-      on<{ board: Board; remainingMs: number }>('ai.move_ok', (data) => {
-        // Show AI piece highlight briefly before updating board
-        if (data.aiMove) {
-          setAiPiece(data.aiMove as any);
+      on<{ board: Board; remainingMs: number; aiMove?: { from: { row: number; col: number }; to: { row: number; col: number } } }>('ai.move_ok', (data) => {
+        if (data.aiMove && board) {
+          // Get the piece type at the from position before the board updates
+          const pieceType = board[data.aiMove.from.row][data.aiMove.from.col];
+          setAiPiece({ ...data.aiMove, pieceType });
+          setAnimating(true);
+          prevBoardRef.current = board;
+          // After animation completes, update the board
           setTimeout(() => {
             setBoard(data.board);
             setAiPiece(null);
-          }, 600);
+            setAnimating(false);
+          }, 500);
         } else {
           setBoard(data.board);
         }
@@ -130,6 +138,12 @@ export function AiGameRoom() {
       }
       // Only send if it's a valid destination
       if (validDests.has(key)) {
+        // Animate human piece before sending to server
+        if (board) {
+          const pieceType = board[selected.row][selected.col];
+          setHumanPiece({ from: selected, to: { row, col }, pieceType });
+          setTimeout(() => setHumanPiece(null), 400);
+        }
         setAiThinking(true);
         emit('ai.move', { gameId, from: selected, to: { row, col } });
         setSelected(null);
@@ -170,7 +184,10 @@ export function AiGameRoom() {
         {board && [...Array(8).keys()].flatMap(row =>
           [...Array(8).keys()].map(col => {
             const dark    = (row + col) % 2 !== 0;
-            const p       = board[row][col];
+            // Hide the piece at 'from' position during animation
+            const isAiMovingFrom   = aiPiece?.from.row === row && aiPiece?.from.col === col;
+            const isHumanMovingFrom = humanPiece?.from.row === row && humanPiece?.from.col === col;
+            const p = (isAiMovingFrom || isHumanMovingFrom) ? 0 : board[row][col];
             const key     = `${row},${col}`;
             const isSel   = selected?.row === row && selected?.col === col;
             const isDest  = validDests.has(key);
@@ -185,8 +202,8 @@ export function AiGameRoom() {
             else if (isDest)     bg = '#A5D6A7';
             else if (isTipFrom)  bg = '#FFE082';
             else if (isTipTo)    bg = '#80DEEA';
-            else if (isAiFrom)   bg = '#EF9A9A';  // red tint — AI piece origin
-            else if (isAiTo)     bg = '#CE93D8';  // purple tint — AI piece destination
+            else if (isAiFrom)   bg = '#EF9A9A';
+            else if (isAiTo)     bg = '#CE93D8';
             else if (dark && canMove && !selected) bg = '#8D6E63';
 
             return (
@@ -204,6 +221,44 @@ export function AiGameRoom() {
               </div>
             );
           })
+        )}
+
+        {/* Animated AI piece overlay */}
+        {aiPiece && (
+          <div style={{
+            position: 'absolute',
+            width: CELL_SIZE * 0.75,
+            height: CELL_SIZE * 0.75,
+            borderRadius: '50%',
+            background: PIECE_COLORS[aiPiece.pieceType],
+            border: aiPiece.pieceType >= 3 ? '3px solid gold' : 'none',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+            left: aiPiece.from.col * CELL_SIZE + CELL_SIZE * 0.125,
+            top:  aiPiece.from.row * CELL_SIZE + CELL_SIZE * 0.125,
+            transform: `translate(${(aiPiece.to.col - aiPiece.from.col) * CELL_SIZE}px, ${(aiPiece.to.row - aiPiece.from.row) * CELL_SIZE}px)`,
+            transition: 'transform 0.45s cubic-bezier(0.4, 0, 0.2, 1)',
+            zIndex: 10,
+            pointerEvents: 'none',
+          }} />
+        )}
+
+        {/* Animated human piece overlay */}
+        {humanPiece && (
+          <div style={{
+            position: 'absolute',
+            width: CELL_SIZE * 0.75,
+            height: CELL_SIZE * 0.75,
+            borderRadius: '50%',
+            background: PIECE_COLORS[humanPiece.pieceType],
+            border: humanPiece.pieceType >= 3 ? '3px solid gold' : 'none',
+            boxShadow: '0 4px 8px rgba(0,0,0,0.4)',
+            left: humanPiece.from.col * CELL_SIZE + CELL_SIZE * 0.125,
+            top:  humanPiece.from.row * CELL_SIZE + CELL_SIZE * 0.125,
+            transform: `translate(${(humanPiece.to.col - humanPiece.from.col) * CELL_SIZE}px, ${(humanPiece.to.row - humanPiece.from.row) * CELL_SIZE}px)`,
+            transition: 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+            zIndex: 10,
+            pointerEvents: 'none',
+          }} />
         )}
       </div>
       {invalid && <p style={styles.invalid}>{invalid}</p>}

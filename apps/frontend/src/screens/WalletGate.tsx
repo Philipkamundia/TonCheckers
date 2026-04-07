@@ -24,9 +24,11 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
   // Auto-authenticate when wallet connects — but only if not in a logged-out state
   useEffect(() => {
     if (!wallet) { hideMainButton(); return; }
-    // If accessToken exists, user is already authenticated — don't re-auth
     if (accessToken) return;
-    doAuth(wallet, initData);
+    // Small delay to allow tonProof to be attached to the wallet object
+    // TonConnect fires the connection event before proof is fully populated
+    const timer = setTimeout(() => doAuth(wallet, initData), 300);
+    return () => clearTimeout(timer);
   }, [wallet]);
 
   function openWalletModal() {
@@ -62,7 +64,19 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
         // No proof — wallet was already connected before app opened.
         // Safe for returning users (already proved ownership on first connect).
         // New users will be rejected by the server and prompted to reconnect.
-        res = await authApi.verify({ walletAddress: address, initData: currentInitData });
+        try {
+          res = await authApi.verify({ walletAddress: address, initData: currentInitData });
+        } catch (verifyErr: unknown) {
+          const code = (verifyErr as { response?: { data?: { code?: string } } })?.response?.data?.code;
+          if (code === 'USER_NOT_FOUND') {
+            // New user with no proof yet — prompt reconnect to get fresh proof
+            setError('Please tap "Connect Wallet" again to verify wallet ownership.');
+            haptic.error();
+            setLoading(false);
+            return;
+          }
+          throw verifyErr;
+        }
       }
 
       setTokens(res.data.accessToken, res.data.refreshToken);

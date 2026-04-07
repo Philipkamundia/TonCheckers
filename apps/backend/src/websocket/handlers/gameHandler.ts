@@ -207,7 +207,62 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
     }
   });
 
-  // ─── disconnect (forfeit) ─────────────────────────────────────────────────
+  // ─── game.offer_draw ─────────────────────────────────────────────────────
+  socket.on('game.offer_draw', async ({ gameId }: { gameId: string }) => {
+    try {
+      const game = await GameService.getGame(gameId);
+      if (!game || game.status !== 'active') return;
+      if (game.player1Id !== userId && game.player2Id !== userId) return;
+
+      const { rows: [user] } = await (await import('../../config/db.js')).default.query(
+        'SELECT username FROM users WHERE id=$1', [userId],
+      );
+      const opponentId = game.player1Id === userId ? game.player2Id! : game.player1Id;
+
+      io.to(`user:${opponentId}`).emit('game.draw_offer', {
+        gameId, fromUserId: userId, fromUsername: user?.username ?? 'Opponent',
+      });
+      logger.info(`Draw offered: game=${gameId} by=${userId}`);
+    } catch (err) {
+      logger.error(`game.offer_draw: ${(err as Error).message}`);
+    }
+  });
+
+  // ─── game.accept_draw ────────────────────────────────────────────────────
+  socket.on('game.accept_draw', async ({ gameId }: { gameId: string }) => {
+    try {
+      const game = await GameService.getGame(gameId);
+      if (!game || game.status !== 'active') return;
+      if (game.player1Id !== userId && game.player2Id !== userId) return;
+
+      await GameTimerService.clearTimer(gameId);
+      const drawResult = await SettlementService.settleDraw(
+        gameId, game.player1Id, game.player2Id!, game.stake,
+      );
+      io.to(`game:${gameId}`).emit('game.draw', {
+        gameId, stake: drawResult.stake, returned: drawResult.stake,
+        message: 'Draw agreed — stakes returned in full',
+      });
+      GameRoomManager.remove(gameId);
+      logger.info(`Draw accepted: game=${gameId} by=${userId}`);
+    } catch (err) {
+      logger.error(`game.accept_draw: ${(err as Error).message}`);
+    }
+  });
+
+  // ─── game.decline_draw ───────────────────────────────────────────────────
+  socket.on('game.decline_draw', async ({ gameId }: { gameId: string }) => {
+    try {
+      const game = await GameService.getGame(gameId);
+      if (!game || game.status !== 'active') return;
+
+      const opponentId = game.player1Id === userId ? game.player2Id! : game.player1Id;
+      io.to(`user:${opponentId}`).emit('game.draw_offer_declined', { gameId });
+      logger.info(`Draw declined: game=${gameId} by=${userId}`);
+    } catch (err) {
+      logger.error(`game.decline_draw: ${(err as Error).message}`);
+    }
+  });
   // PRD §6: Disconnect = forfeit
   socket.on('disconnect', async () => {
     const room = GameRoomManager.getBySocketId(socket.id);

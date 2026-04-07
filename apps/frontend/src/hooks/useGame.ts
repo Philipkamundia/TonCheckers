@@ -39,12 +39,25 @@ export function useGame(gameId: string | null, myPlayerNumber: 1 | 2 | null) {
   });
   const [selectedPiece, setSelectedPiece] = useState<{ row: number; col: number } | null>(null);
   const [invalidMove, setInvalidMove]     = useState<string | null>(null);
+  const [drawOffer,   setDrawOffer]       = useState<string | null>(null); // username who offered draw
 
   // Subscribe to game room on mount
   useEffect(() => {
     if (!gameId) return;
     subscribe(gameId);
   }, [gameId, subscribe]);
+
+  // Client-side countdown — ticks when it's our turn and game is active
+  useEffect(() => {
+    if (gameState.status !== 'active') return;
+    if (gameState.activePlayer !== myPlayerNumber) return;
+    if (!gameState.board) return;
+
+    const interval = setInterval(() => {
+      setGameState(prev => ({ ...prev, remainingMs: Math.max(0, prev.remainingMs - 1000) }));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [gameState.status, gameState.activePlayer, myPlayerNumber, gameState.board]);
 
   // Wire all game events
   useEffect(() => {
@@ -57,7 +70,7 @@ export function useGame(gameId: string | null, myPlayerNumber: 1 | 2 | null) {
           ...prev,
           board:        data.board,
           activePlayer: data.activePlayer,
-          remainingMs:  data.remainingMs,
+          remainingMs:  data.remainingMs ?? 30_000,
         }));
         setSelectedPiece(null);
         setInvalidMove(null);
@@ -75,13 +88,22 @@ export function useGame(gameId: string | null, myPlayerNumber: 1 | 2 | null) {
       }),
       on<{ gameId: string; stake: string; returned: string }>('game.draw', (data) => {
         haptic.warning();
-        setGameState(prev => ({ ...prev, status: 'completed', result: { reason: 'draw', stake: data.stake } }));
+        setGameState(prev => ({ ...prev, status: 'completed', result: { reason: 'draw', stake: (data as any).stake } }));
       }),
       on<{ gameId: string }>('game.crashed', () => {
         setGameState(prev => ({ ...prev, status: 'crashed' }));
       }),
       on<{ remainingMs: number }>('game.tick', ({ remainingMs }) => {
         setGameState(prev => ({ ...prev, remainingMs }));
+      }),
+      on<{ fromUsername: string }>('game.draw_offer', ({ fromUsername }) => {
+        setDrawOffer(fromUsername);
+        haptic.impact('medium');
+      }),
+      on<{}>('game.draw_offer_declined', () => {
+        setDrawOffer(null);
+        setInvalidMove('Opponent declined the draw offer');
+        setTimeout(() => setInvalidMove(null), 3_000);
       }),
     ];
     return () => unsubs.forEach(u => u());
@@ -99,5 +121,23 @@ export function useGame(gameId: string | null, myPlayerNumber: 1 | 2 | null) {
     haptic.impact('heavy');
   }, [gameId, emit, haptic]);
 
-  return { gameState, selectedPiece, setSelectedPiece, invalidMove, makeMove, resign };
+  const offerDraw = useCallback(() => {
+    if (!gameId) return;
+    emit('game.offer_draw', { gameId });
+    haptic.impact('light');
+  }, [gameId, emit, haptic]);
+
+  const acceptDraw = useCallback(() => {
+    if (!gameId) return;
+    emit('game.accept_draw', { gameId });
+    setDrawOffer(null);
+  }, [gameId, emit]);
+
+  const declineDraw = useCallback(() => {
+    if (!gameId) return;
+    emit('game.decline_draw', { gameId });
+    setDrawOffer(null);
+  }, [gameId, emit]);
+
+  return { gameState, selectedPiece, setSelectedPiece, invalidMove, makeMove, resign, offerDraw, acceptDraw, declineDraw, drawOffer };
 }
