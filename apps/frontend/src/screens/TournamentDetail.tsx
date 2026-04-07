@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -22,6 +22,15 @@ interface TournamentData {
   participants: Participant[]; matches: Match[];
 }
 
+// Phase the bracket screen can be in
+type BracketPhase =
+  | 'open'           // tournament not started yet
+  | 'presence'       // 30s presence window — waiting for players
+  | 'match_preview'  // 10s showing pairs before heading to lobby
+  | 'waiting'        // waiting for next opponent to finish their game
+  | 'complete_preview' // 10s showing final bracket before complete screen
+  | 'done';          // tournament over, navigating away
+
 export function TournamentDetail() {
   const { id } = useParams<{ id: string }>();
   const { showBackButton, showMainButton, hideMainButton, setMainButtonLoading, haptic } = useTelegram();
@@ -33,7 +42,15 @@ export function TournamentDetail() {
   const [joined,           setJoined]           = useState(false);
   const [error,            setError]            = useState<string | null>(null);
   const [statusMsg,        setStatusMsg]        = useState<string | null>(null);
-  const [bracketCountdown, setBracketCountdown] = useState<number | null>(null);
+  const [phase,            setPhase]            = useState<BracketPhase>('open');
+  const [phaseCountdown,   setPhaseCountdown]   = useState<number>(0);
+
+  // Pending lobby payload — held during match_preview phase
+  const pendingLobbyRef = useRef<TournamentLobbyPayload | null>(null);
+  // Pending complete data — held during complete_preview phase
+  const pendingCompleteRef = useRef<{
+    isWinner: boolean; winnerUsername: string; winnerPayout: string; prizePool: string;
+  } | null>(null);
 
   const refresh = () =>
     tournamentApi.get(id!).then(r => setTournament(r.data.tournament)).catch(() => null);
@@ -41,48 +58,109 @@ export function TournamentDetail() {
   useEffect(() => { return showBackButton(() => navigate('/tournaments')); }, []);
   useEffect(() => { refresh(); }, [id]);
 
-  // Signal bracket presence as soon as we land here
+  // Signal bracket presence on mount
   useEffect(() => {
     if (!id) return;
     emit('tournament.bracket_join', { tournamentId: id });
   }, [id]);
 
-  // 30s countdown — active when tournament is in_progress but currentRound=0 (window open)
+  // Detect presence window from tournament state
   useEffect(() => {
-    if (!tournament || tournament.status !== 'in_progress' || tournament.currentRound !== 0) return;
-    setBracketCountdown(30);
+    if (!tournament) return;
+    if (tournament.status === 'in_progress' && tournament.currentRound === 0) {
+      setPhase('presence');
+      setPhaseCountdown(30);
+    } else if (tournament.status === 'open') {
+      setPhase('open');
+    }
+  }, [tournament?.status, tournament?.currentRound]);
+
+  // Countdown ticker — drives presence (30s), match_preview (10s), complete_preview (10s)
+  useEffect(() => {
+    if (!['presence', 'match_preview', 'complete_preview'].includes(phase)) return;
+    if (phaseCountdown <= 0) return;
+
     const timer = setInterval(() => {
-      setBracketCountdown(prev => {
-        if (prev === null || prev <= 1) { clearInterval(timer); return 0; }
+      setPhaseCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
         return prev - 1;
       });
     }, 1_000);
     return () => clearInterval(timer);
-  }, [tournament?.status, tournament?.currentRound]);
+  }, [phase]);
+
+  // When match_preview countdown hits 0 → go to lobby
+  useEffect(() => {
+    if (phase !== 'match_preview' || phaseCountdown !== 0) return;
+    const lobby = pendingLobbyRef.current;
+    if (!lobby) return;
+    setPendingTournamentLobby(lobby);
+    pendingLobbyRef.current = null;
+    navigate(`/tournament-lobby/${lobby.gameId}`);
+  }, [phase, phaseCountdown]);
+
+  // When complete_preview countdown hits 0 → go to complete screen
+  useEffect(() => {
+    if (phase !== 'complete_preview' || phaseCountdown !== 0) return;
+    const data = pendingCompleteRef.current;
+    if (!data) return;
+    setPhase('done');
+    navigate(`/tournaments/${id}/complete`, {
+      replace: true,
+      state: { tournamentName: tournament?.name ?? '', ...data },
+    });
+  }, [phase, phaseCountdown]);
 
   // Live WS events
   useEffect(() => {
     const unsubs = [
       on<TournamentLobbyPayload>('tournament.lobby_ready', (data) => {
         if (data.tournamentId !== id) return;
-        setPendingTournamentLobby(data);
-        navigate(`/tournament-lobby/${data.gameId}`);
+        haptic.impact('medium');
+        // Refresh bracket so pairs are visible, then hold for 10s
+        refresh().then(() => {
+          pendingLobbyRef.current = data;
+          setPhase('match_preview');
+          setPhaseCountdown(10);
+          setStatusMsg(null);
+        });
       }),
+
       on<{ tournamentId: string }>('tournament.bye_advance', (data) => {
         if (data.tournamentId !== id) return;
+        setPhase('waiting');
         setStatusMsg('You have a bye — waiting for your next opponent…');
         refresh();
       }),
-      on<{ tournamentId: string }>('tournament.completed', (data) => {
+
+      on<{ tournamentId: string; winnerId: string; winnerPayout: string }>('tournament.completed', (data) => {
         if (data.tournamentId !== id) return;
-        refresh();
+        refresh().then((t: any) => {
+          const updated: TournamentData = t?.data?.tournament ?? tournament!;
+          const myId = user?.id;
+          const isWinner = data.winnerId === myId;
+          const winnerParticipant = updated?.participants?.find((p: Participant) => p.userId === data.winnerId);
+          pendingCompleteRef.current = {
+            isWinner,
+            winnerUsername: winnerParticipant?.username ?? '?',
+            winnerPayout:   data.winnerPayout,
+            prizePool:      updated?.prizePool ?? '0',
+          };
+          setPhase('complete_preview');
+          setPhaseCountdown(10);
+        });
       }),
+
       on<{ tournamentId: string; reason: string }>('tournament.cancelled', (data) => {
         if (data.tournamentId !== id) return;
         setError(`Tournament cancelled: ${data.reason}`);
         setTournament(prev => prev ? { ...prev, status: 'cancelled' } : prev);
         hideMainButton();
       }),
+
       on<{ tournamentId: string }>('tournament.bracket_forfeit', (data) => {
         if (data.tournamentId !== id) return;
         setError('You were forfeited — did not join bracket in time');
@@ -91,7 +169,7 @@ export function TournamentDetail() {
     return () => unsubs.forEach(u => u());
   }, [on, id]);
 
-  // Join button — only when open and not yet joined
+  // Join button
   useEffect(() => {
     if (!tournament || tournament.status !== 'open' || joined) { hideMainButton(); return; }
     return showMainButton(`Join · ${parseFloat(tournament.entryFee).toFixed(2)} TON`, handleJoin, { color: '#2AABEE' });
@@ -114,10 +192,8 @@ export function TournamentDetail() {
 
   if (!tournament) return <div style={styles.loading}>Loading…</div>;
 
-  const isInProgress    = tournament.status === 'in_progress';
-  const isCompleted     = tournament.status === 'completed';
-  const isBracketWindow = isInProgress && tournament.currentRound === 0;
-  const myId            = user?.id;
+  const isInProgress = tournament.status === 'in_progress';
+  const myId         = user?.id;
 
   const startsDate  = tournament.startsAt ? new Date(tournament.startsAt) : null;
   const startsLabel = startsDate && !isNaN(startsDate.getTime())
@@ -139,9 +215,33 @@ export function TournamentDetail() {
     ? (myActiveMatch.player1Id === myId ? myActiveMatch.player2Id : myActiveMatch.player1Id)
     : null;
 
-  const me           = tournament.participants.find(p => p.userId === myId);
-  const isEliminated = me?.isEliminated ?? false;
-  const isWinner     = isCompleted && tournament.winnerId === myId;
+  const me = tournament.participants.find(p => p.userId === myId);
+
+  // Phase banner content
+  const phaseBanner = (() => {
+    if (phase === 'presence') return {
+      title: '🏆 Tournament Starting!',
+      sub: 'Pairs are being determined — stay on this screen',
+      hint: 'Players not here will be forfeited',
+      countdown: phaseCountdown,
+      color: phaseCountdown <= 10 ? '#E53935' : '#2AABEE',
+    };
+    if (phase === 'match_preview') return {
+      title: '⚔️ Match Found!',
+      sub: 'Your opponent is ready — heading to lobby soon',
+      hint: 'Game starting in…',
+      countdown: phaseCountdown,
+      color: '#4CAF50',
+    };
+    if (phase === 'complete_preview') return {
+      title: '🏁 Tournament Complete!',
+      sub: pendingCompleteRef.current?.isWinner ? '🏆 You won!' : `Winner: ${pendingCompleteRef.current?.winnerUsername}`,
+      hint: 'Showing results in…',
+      countdown: phaseCountdown,
+      color: '#2AABEE',
+    };
+    return null;
+  })();
 
   return (
     <div style={styles.container}>
@@ -158,25 +258,22 @@ export function TournamentDetail() {
       )}
       {error     && <p style={styles.error}>{error}</p>}
       {joined    && <p style={styles.success}>✅ Registered! You'll be notified before start.</p>}
-      {statusMsg && <p style={styles.statusMsg}>{statusMsg}</p>}
+      {statusMsg && phase === 'waiting' && <p style={styles.statusMsg}>{statusMsg}</p>}
 
-      {/* Bracket presence countdown */}
-      {isBracketWindow && (
-        <div style={styles.bracketWindow}>
-          <p style={styles.bracketWindowTitle}>🏆 Tournament Starting!</p>
-          <p style={styles.bracketWindowSub}>Pairs are being determined — stay on this screen</p>
-          <div style={{
-            ...styles.countdownCircle,
-            background: (bracketCountdown ?? 30) <= 10 ? '#E53935' : '#2AABEE',
-          }}>
-            <span style={styles.countdownNum}>{bracketCountdown ?? 30}</span>
+      {/* Phase countdown banner */}
+      {phaseBanner && (
+        <div style={{ ...styles.phaseBanner, borderColor: phaseBanner.color }}>
+          <p style={styles.phaseBannerTitle}>{phaseBanner.title}</p>
+          <p style={styles.phaseBannerSub}>{phaseBanner.sub}</p>
+          <div style={{ ...styles.countdownCircle, background: phaseBanner.color }}>
+            <span style={styles.countdownNum}>{phaseBanner.countdown}</span>
           </div>
-          <p style={styles.bracketWindowHint}>Players not here will be forfeited</p>
+          <p style={styles.phaseBannerHint}>{phaseBanner.hint}</p>
         </div>
       )}
 
       {/* My active match callout */}
-      {myActiveMatch && myOpponentId && (() => {
+      {myActiveMatch && myOpponentId && phase === 'waiting' && (() => {
         const opp = tournament.participants.find(p => p.userId === myOpponentId);
         return (
           <div style={styles.myMatchBanner}>
@@ -189,20 +286,6 @@ export function TournamentDetail() {
           </div>
         );
       })()}
-
-      {/* Completed banner */}
-      {isCompleted && (
-        <div style={styles.completedBanner}>
-          <p style={styles.completedEmoji}>{isWinner ? '🏆' : '🎖️'}</p>
-          <p style={styles.completedTitle}>
-            {isWinner
-              ? 'You won the tournament!'
-              : `Winner: ${tournament.participants.find(p => p.userId === tournament.winnerId)?.username ?? '?'}`}
-          </p>
-          {isWinner && <p style={styles.completedSub}>+{tournament.winnerPayout} TON</p>}
-          {isEliminated && !isWinner && <p style={styles.completedSub}>You were eliminated</p>}
-        </div>
-      )}
 
       {/* Bracket */}
       {maxRound > 0 && (
@@ -298,35 +381,31 @@ function PrizeRow({ label, value }: { label: string; value: string }) {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container:          { padding: '16px', background: 'var(--tg-theme-bg-color)', minHeight: '100vh', paddingBottom: 80 },
-  loading:            { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--tg-theme-hint-color)', background: 'var(--tg-theme-bg-color)' },
-  title:              { color: 'var(--tg-theme-text-color)', fontSize: 22, fontWeight: 700, margin: '0 0 12px' },
-  infoRow:            { display: 'flex', justifyContent: 'space-around', background: 'var(--tg-theme-secondary-bg-color)', borderRadius: 14, padding: 14, marginBottom: 12 },
-  starts:             { color: '#4CAF50', fontSize: 13, marginBottom: 8 },
-  error:              { color: 'var(--tg-theme-destructive-text-color)', fontSize: 13 },
-  success:            { color: '#4CAF50', fontSize: 13 },
-  statusMsg:          { color: '#2AABEE', fontSize: 13, textAlign: 'center', padding: '8px 0' },
-  bracketWindow:      { background: 'rgba(42,171,238,0.1)', border: '1px solid #2AABEE', borderRadius: 16, padding: '20px 16px', textAlign: 'center', marginBottom: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 },
-  bracketWindowTitle: { color: 'var(--tg-theme-text-color)', fontSize: 18, fontWeight: 700, margin: 0 },
-  bracketWindowSub:   { color: 'var(--tg-theme-hint-color)', fontSize: 13, margin: 0 },
-  bracketWindowHint:  { color: 'var(--tg-theme-hint-color)', fontSize: 12, margin: 0 },
-  countdownCircle:    { width: 72, height: 72, borderRadius: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  countdownNum:       { color: '#fff', fontSize: 32, fontWeight: 700 },
-  myMatchBanner:      { background: 'rgba(42,171,238,0.12)', border: '1px solid #2AABEE', borderRadius: 14, padding: '12px 16px', marginBottom: 12 },
-  myMatchLabel:       { color: '#2AABEE', fontSize: 12, fontWeight: 600, margin: '0 0 8px', textTransform: 'uppercase' as const, letterSpacing: 0.5 },
-  myMatchRow:         { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  myMatchMe:          { color: 'var(--tg-theme-text-color)', fontWeight: 700, fontSize: 15 },
-  myMatchVs:          { color: 'var(--tg-theme-hint-color)', fontSize: 13, padding: '0 12px' },
-  myMatchOpp:         { color: 'var(--tg-theme-text-color)', fontSize: 15 },
-  completedBanner:    { background: 'var(--tg-theme-secondary-bg-color)', borderRadius: 20, padding: '20px 16px', textAlign: 'center', marginBottom: 12 },
-  completedEmoji:     { fontSize: 44, margin: '0 0 6px' },
-  completedTitle:     { color: 'var(--tg-theme-text-color)', fontSize: 18, fontWeight: 700, margin: '0 0 4px' },
-  completedSub:       { color: 'var(--tg-theme-hint-color)', fontSize: 14, margin: 0 },
-  section:            { background: 'var(--tg-theme-secondary-bg-color)', borderRadius: 14, padding: 14, marginTop: 12 },
-  sectionTitle:       { color: 'var(--tg-theme-text-color)', fontWeight: 600, fontSize: 15, margin: '0 0 10px' },
-  roundLabel:         { color: 'var(--tg-theme-hint-color)', fontSize: 12, margin: '8px 0 4px', textTransform: 'uppercase' as const, letterSpacing: 0.5 },
-  matchCard:          { display: 'flex', alignItems: 'center', background: 'var(--tg-theme-bg-color)', borderRadius: 10, padding: '10px 12px', marginBottom: 6 },
-  matchCardMine:      { border: '1px solid rgba(42,171,238,0.3)' },
-  matchCardActive:    { border: '1px solid #2AABEE', background: 'rgba(42,171,238,0.06)' },
-  vs:                 { color: 'var(--tg-theme-hint-color)', fontSize: 12, padding: '0 10px', flexShrink: 0 },
+  container:        { padding: '16px', background: 'var(--tg-theme-bg-color)', minHeight: '100vh', paddingBottom: 80 },
+  loading:          { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--tg-theme-hint-color)', background: 'var(--tg-theme-bg-color)' },
+  title:            { color: 'var(--tg-theme-text-color)', fontSize: 22, fontWeight: 700, margin: '0 0 12px' },
+  infoRow:          { display: 'flex', justifyContent: 'space-around', background: 'var(--tg-theme-secondary-bg-color)', borderRadius: 14, padding: 14, marginBottom: 12 },
+  starts:           { color: '#4CAF50', fontSize: 13, marginBottom: 8 },
+  error:            { color: 'var(--tg-theme-destructive-text-color)', fontSize: 13 },
+  success:          { color: '#4CAF50', fontSize: 13 },
+  statusMsg:        { color: '#2AABEE', fontSize: 13, textAlign: 'center', padding: '8px 0' },
+  phaseBanner:      { background: 'rgba(42,171,238,0.08)', border: '1px solid #2AABEE', borderRadius: 16, padding: '20px 16px', textAlign: 'center', marginBottom: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 },
+  phaseBannerTitle: { color: 'var(--tg-theme-text-color)', fontSize: 18, fontWeight: 700, margin: 0 },
+  phaseBannerSub:   { color: 'var(--tg-theme-hint-color)', fontSize: 13, margin: 0 },
+  phaseBannerHint:  { color: 'var(--tg-theme-hint-color)', fontSize: 12, margin: 0 },
+  countdownCircle:  { width: 72, height: 72, borderRadius: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  countdownNum:     { color: '#fff', fontSize: 32, fontWeight: 700 },
+  myMatchBanner:    { background: 'rgba(42,171,238,0.12)', border: '1px solid #2AABEE', borderRadius: 14, padding: '12px 16px', marginBottom: 12 },
+  myMatchLabel:     { color: '#2AABEE', fontSize: 12, fontWeight: 600, margin: '0 0 8px', textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+  myMatchRow:       { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  myMatchMe:        { color: 'var(--tg-theme-text-color)', fontWeight: 700, fontSize: 15 },
+  myMatchVs:        { color: 'var(--tg-theme-hint-color)', fontSize: 13, padding: '0 12px' },
+  myMatchOpp:       { color: 'var(--tg-theme-text-color)', fontSize: 15 },
+  section:          { background: 'var(--tg-theme-secondary-bg-color)', borderRadius: 14, padding: 14, marginTop: 12 },
+  sectionTitle:     { color: 'var(--tg-theme-text-color)', fontWeight: 600, fontSize: 15, margin: '0 0 10px' },
+  roundLabel:       { color: 'var(--tg-theme-hint-color)', fontSize: 12, margin: '8px 0 4px', textTransform: 'uppercase' as const, letterSpacing: 0.5 },
+  matchCard:        { display: 'flex', alignItems: 'center', background: 'var(--tg-theme-bg-color)', borderRadius: 10, padding: '10px 12px', marginBottom: 6 },
+  matchCardMine:    { border: '1px solid rgba(42,171,238,0.3)' },
+  matchCardActive:  { border: '1px solid #2AABEE', background: 'rgba(42,171,238,0.06)' },
+  vs:               { color: 'var(--tg-theme-hint-color)', fontSize: 12, padding: '0 10px', flexShrink: 0 },
 };

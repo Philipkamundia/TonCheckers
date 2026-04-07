@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { useStore } from './store';
@@ -14,13 +14,13 @@ import { TournamentList }         from './screens/TournamentList';
 import { TournamentDetail }       from './screens/TournamentDetail';
 import { TournamentCreate }       from './screens/TournamentCreate';
 import { TournamentLobbyRoom }    from './screens/TournamentLobbyRoom';
+import { TournamentComplete }     from './screens/TournamentComplete';
 import { Leaderboard }            from './screens/Leaderboard';
 import { Deposit }                from './screens/Deposit';
 import { Withdraw }               from './screens/Withdraw';
 import { Profile }                from './screens/Profile';
 import { AdminDashboard }         from './screens/AdminDashboard';
 import { useWebSocket }           from './hooks/useWebSocket';
-import type { TournamentLobbyPayload } from './store';
 
 const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://toncheckers.pages.dev'}/tonconnect-manifest.json`;
 
@@ -35,15 +35,11 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  const { accessToken, user, activeGameId, setPendingTournamentLobby } = useStore();
+  const { accessToken, user } = useStore();
   const navigate = useNavigate();
   const { on } = useWebSocket();
   const postAuthPath = '/';
 
-  const activeGameIdRef = useRef(activeGameId);
-  useEffect(() => { activeGameIdRef.current = activeGameId; }, [activeGameId]);
-
-  // Pending tournament starting prompts (can be multiple concurrent tournaments)
   const [tournamentPrompts, setTournamentPrompts] = useState<
     Array<{ tournamentId: string; tournamentName: string; windowSeconds: number }>
   >([]);
@@ -67,16 +63,6 @@ function AppRoutes() {
   function declineTournament(tournamentId: string) {
     setTournamentPrompts(prev => prev.filter(p => p.tournamentId !== tournamentId));
   }
-
-  // Global tournament lobby_ready — route directly if not in a game
-  useEffect(() => {
-    return on<TournamentLobbyPayload>('tournament.lobby_ready', (data) => {
-      if (!activeGameIdRef.current) {
-        setPendingTournamentLobby(data);
-        navigate(`/tournament-lobby/${data.gameId}`);
-      }
-    });
-  }, [on]);
 
   return (
     <>
@@ -128,6 +114,7 @@ function AppRoutes() {
       <Route path="/tournaments"                    element={<ProtectedRoute><TournamentList /></ProtectedRoute>} />
       <Route path="/tournaments/create"             element={<ProtectedRoute><TournamentCreate /></ProtectedRoute>} />
       <Route path="/tournaments/:id"                element={<ProtectedRoute><TournamentDetail /></ProtectedRoute>} />
+      <Route path="/tournaments/:id/complete"       element={<ProtectedRoute><TournamentComplete /></ProtectedRoute>} />
       <Route path="/tournament-lobby/:gameId"       element={<ProtectedRoute><TournamentLobbyRoom /></ProtectedRoute>} />
 
       <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
