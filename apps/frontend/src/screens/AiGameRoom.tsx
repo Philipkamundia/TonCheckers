@@ -1,7 +1,7 @@
 /**
  * AiGameRoom.tsx — AI practice game (PRD §8)
  */
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -28,8 +28,6 @@ export function AiGameRoom() {
   const [tip,        setTip]        = useState<{ from: { row: number; col: number }; to: { row: number; col: number } } | null>(null);
   const [aiPiece,    setAiPiece]    = useState<{ from: { row: number; col: number }; to: { row: number; col: number }; pieceType: number } | null>(null);
   const [humanPiece, setHumanPiece] = useState<{ from: { row: number; col: number }; to: { row: number; col: number }; pieceType: number } | null>(null);
-  const [animating,  setAnimating]  = useState(false);
-  const prevBoardRef = useRef<Board | null>(null);
 
   // Client-side countdown — ticks every second when it's the human's turn
   useEffect(() => {
@@ -58,16 +56,11 @@ export function AiGameRoom() {
     const unsubs = [
       on<{ board: Board; remainingMs: number; aiMove?: { from: { row: number; col: number }; to: { row: number; col: number } } }>('ai.move_ok', (data) => {
         if (data.aiMove && board) {
-          // Get the piece type at the from position before the board updates
           const pieceType = board[data.aiMove.from.row][data.aiMove.from.col];
           setAiPiece({ ...data.aiMove, pieceType });
-          setAnimating(true);
-          prevBoardRef.current = board;
-          // After animation completes, update the board
           setTimeout(() => {
             setBoard(data.board);
             setAiPiece(null);
-            setAnimating(false);
           }, 500);
         } else {
           setBoard(data.board);
@@ -138,11 +131,19 @@ export function AiGameRoom() {
       }
       // Only send if it's a valid destination
       if (validDests.has(key)) {
-        // Animate human piece before sending to server
         if (board) {
-          const pieceType = board[selected.row][selected.col];
+          // Optimistically apply human move to board immediately
+          const newBoard = board.map(r => [...r]) as typeof board;
+          const piece = newBoard[selected.row][selected.col];
+          newBoard[selected.row][selected.col] = 0;
+          newBoard[row][col] = piece;
+          // Animate the piece sliding
+          const pieceType = piece;
           setHumanPiece({ from: selected, to: { row, col }, pieceType });
-          setTimeout(() => setHumanPiece(null), 400);
+          setTimeout(() => {
+            setBoard(newBoard);  // show moved piece at destination
+            setHumanPiece(null);
+          }, 350);
         }
         setAiThinking(true);
         emit('ai.move', { gameId, from: selected, to: { row, col } });
