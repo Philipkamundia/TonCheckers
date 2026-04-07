@@ -1,55 +1,54 @@
 /**
  * useWebSocket.ts — Socket.IO client hook
- * Connects with JWT auth, handles reconnects, exposes event emitter.
+ *
+ * Socket is created eagerly at module load (as soon as a token exists),
+ * so event listeners registered in any component are never missed.
  */
-import { useEffect, useRef, useCallback } from 'react';
+import { useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? 'http://localhost:3001';
 
 let globalSocket: Socket | null = null;
 
-function createSocket(token: string): Socket {
-  const socket = io(WS_URL, {
+function getOrCreateSocket(): Socket | null {
+  const token = localStorage.getItem('access_token');
+  if (!token) return null;
+
+  if (globalSocket && !globalSocket.disconnected) return globalSocket;
+
+  globalSocket?.removeAllListeners();
+  globalSocket = io(WS_URL, {
     auth:                 { token },
-    // Use polling first — required for Railway and most proxies.
-    // Socket.IO will upgrade to WebSocket automatically if supported.
     transports:           ['polling', 'websocket'],
     reconnection:         true,
     reconnectionDelay:    1_000,
     reconnectionAttempts: 10,
   });
 
-  socket.on('connect',       () => console.log('[ws] connected', socket.id));
-  socket.on('disconnect',    (r) => console.log('[ws] disconnected', r));
-  socket.on('connect_error', (e) => console.error('[ws] connect_error', e.message));
+  globalSocket.on('connect',       () => console.log('[ws] connected', globalSocket?.id));
+  globalSocket.on('disconnect',    (r) => console.log('[ws] disconnected', r));
+  globalSocket.on('connect_error', (e) => console.error('[ws] connect_error', e.message));
 
-  return socket;
+  return globalSocket;
 }
+
+// Eagerly create on module load if token already exists
+getOrCreateSocket();
 
 /** Update socket auth token — called after token refresh */
 export function updateSocketToken(token: string): void {
   if (globalSocket) {
     globalSocket.auth = { token };
     if (!globalSocket.connected) globalSocket.connect();
+  } else {
+    getOrCreateSocket();
   }
 }
 
 export function useWebSocket() {
-  const socketRef = useRef<Socket | null>(null);
-
-  useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-
-    // Always create a fresh socket if none exists or previous one failed permanently
-    if (!globalSocket || globalSocket.disconnected) {
-      globalSocket?.removeAllListeners();
-      globalSocket = createSocket(token);
-    }
-
-    socketRef.current = globalSocket;
-  }, []);
+  // Ensure socket exists (handles case where token was set after module load)
+  getOrCreateSocket();
 
   const on = useCallback(<T>(event: string, handler: (data: T) => void) => {
     globalSocket?.on(event, handler);
@@ -67,5 +66,5 @@ export function useWebSocket() {
     globalSocket?.emit('game.subscribe', { gameId });
   }, []);
 
-  return { on, emit, subscribe, socket: socketRef };
+  return { on, emit, subscribe };
 }
