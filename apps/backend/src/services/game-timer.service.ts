@@ -19,10 +19,11 @@ export class GameTimerService {
   /** Start (or reset) timer on each turn change */
   static async startTimer(gameId: string, activePlayer: 1 | 2): Promise<void> {
     const expiresAt = Date.now() + MOVE_TIMEOUT_MS;
-    const ttlMs     = MOVE_TIMEOUT_MS + 5_000;
+    // Store expiry + activePlayer in one key: "timestamp:player"
+    // This ensures both values expire together and are read atomically
+    const ttlMs = MOVE_TIMEOUT_MS + 10_000; // extra buffer for slow job runs
     await Promise.all([
-      redis.set(`${TIMER_PREFIX}${gameId}`,  String(expiresAt),    'PX', ttlMs),
-      redis.set(`${ACTIVE_PREFIX}${gameId}`, String(activePlayer), 'PX', ttlMs),
+      redis.set(`${TIMER_PREFIX}${gameId}`,  `${expiresAt}:${activePlayer}`, 'PX', ttlMs),
       redis.sadd(ACTIVE_SET, gameId),
     ]);
   }
@@ -31,7 +32,6 @@ export class GameTimerService {
   static async clearTimer(gameId: string): Promise<void> {
     await Promise.all([
       redis.del(`${TIMER_PREFIX}${gameId}`),
-      redis.del(`${ACTIVE_PREFIX}${gameId}`),
       redis.srem(ACTIVE_SET, gameId),
     ]);
   }
@@ -40,38 +40,38 @@ export class GameTimerService {
   static async getRemainingMs(gameId: string): Promise<number | null> {
     const val = await redis.get(`${TIMER_PREFIX}${gameId}`);
     if (!val) return null;
-    return Math.max(0, parseInt(val, 10) - Date.now());
+    const expiresAt = parseInt(val.split(':')[0], 10);
+    return Math.max(0, expiresAt - Date.now());
   }
 
   static async getActivePlayer(gameId: string): Promise<1 | 2 | null> {
-    const val = await redis.get(`${ACTIVE_PREFIX}${gameId}`);
+    const val = await redis.get(`${TIMER_PREFIX}${gameId}`);
     if (!val) return null;
-    return parseInt(val, 10) as 1 | 2;
+    const parts = val.split(':');
+    return parseInt(parts[1], 10) as 1 | 2;
   }
 
-  /**
-   * Return all expired game timers — called every 1s by gameTimerCheck job.
-   * Uses a Redis Set instead of KEYS scan to avoid O(N) blocking.
-   */
   static async getExpiredGames(): Promise<Array<{ gameId: string; timedOutPlayer: 1 | 2 }>> {
     const gameIds = await redis.smembers(ACTIVE_SET);
     const expired: Array<{ gameId: string; timedOutPlayer: 1 | 2 }> = [];
 
     for (const gameId of gameIds) {
-      const remaining = await GameTimerService.getRemainingMs(gameId);
+      const val = await redis.get(`${TIMER_PREFIX}${gameId}`);
 
-      if (remaining === null) {
+      if (!val) {
         // Key expired naturally — remove stale set entry
         await redis.srem(ACTIVE_SET, gameId);
         continue;
       }
 
+      const parts     = val.split(':');
+      const expiresAt = parseInt(parts[0], 10);
+      const player    = parseInt(parts[1], 10) as 1 | 2;
+      const remaining = Math.max(0, expiresAt - Date.now());
+
       if (remaining === 0) {
-        const player = await GameTimerService.getActivePlayer(gameId);
-        if (player) {
-          expired.push({ gameId, timedOutPlayer: player });
-          logger.info(`Timer expired: game=${gameId} player=${player}`);
-        }
+        expired.push({ gameId, timedOutPlayer: player });
+        logger.info(`Timer expired: game=${gameId} player=${player}`);
       }
     }
 

@@ -85,8 +85,8 @@ export class SettlementService {
            status='completed',
            result=(CASE WHEN player1_id=$1 THEN 'player1_win' ELSE 'player2_win' END)::game_result,
            platform_fee=$2, winner_payout=$3,
-           player1_elo_after=CASE WHEN player1_id=$1 THEN $4 ELSE $5 END,
-           player2_elo_after=CASE WHEN player1_id=$1 THEN $5 ELSE $4 END,
+           player1_elo_after=(CASE WHEN player1_id=$1 THEN $4 ELSE $5 END)::integer,
+           player2_elo_after=(CASE WHEN player1_id=$1 THEN $5 ELSE $4 END)::integer,
            ended_at=NOW(), updated_at=NOW()
          WHERE id=$6 AND status='active'`,
         [winnerId, platformFee, winnerPayout, elo.player1NewElo, elo.player2NewElo, gameId],
