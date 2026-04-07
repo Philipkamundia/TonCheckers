@@ -25,17 +25,20 @@ export function TournamentLobbyRoom() {
 
   const lobby = pendingTournamentLobby;
 
-  // Signal presence as soon as we land here
+  // Signal presence as soon as we land here, countdown from server expiresAt
   useEffect(() => {
     if (!gameId) return;
     emit('tournament.lobby_join', { gameId });
 
+    const expiresAt = lobby?.expiresAt ?? (Date.now() + 10_000);
+    const initialRemaining = Math.max(1, Math.ceil((expiresAt - Date.now()) / 1000));
+    setCountdown(initialRemaining);
+
     const timer = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) { clearInterval(timer); return 0; }
-        return prev - 1;
-      });
-    }, 1_000);
+      const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+      setCountdown(remaining);
+      if (remaining <= 0) clearInterval(timer);
+    }, 500); // tick every 500ms for accuracy
 
     return () => clearInterval(timer);
   }, [gameId]);

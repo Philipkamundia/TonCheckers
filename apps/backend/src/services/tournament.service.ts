@@ -228,14 +228,14 @@ export class TournamentService {
     );
 
     // Open 30s bracket presence window
-    await TournamentBracketService.openWindow(tournamentId, participants);
+    const meta = await TournamentBracketService.openWindow(tournamentId, participants);
 
-    // Notify all participants — they must accept and head to the bracket screen
+    // Notify all participants — include expiresAt so client shows accurate countdown
     for (const p of participants) {
       io.to(`user:${p.userId}`).emit('tournament.starting', {
         tournamentId,
         tournamentName: t.name,
-        windowSeconds:  30,
+        expiresAt:      meta.expiresAt,
       });
     }
 
@@ -336,17 +336,19 @@ export class TournamentService {
         [tournamentId, game.id, 1, m.matchNumber, m.player1Id, m.player2Id],
       );
 
-      await TournamentLobbyService.createLobby(
+      const { expiresAt: lobbyExpiresAt } = await TournamentLobbyService.createLobby(
         game.id, tournamentId, matchRow.id, m.player1Id!, m.player2Id!,
       );
 
       io.to(`user:${m.player1Id}`).emit('tournament.lobby_ready', {
         tournamentId, gameId: game.id, round: 1,
         opponentId: m.player2Id, opponentUsername: p2Info.username, opponentElo: p2Info.elo,
+        expiresAt: lobbyExpiresAt,
       });
       io.to(`user:${m.player2Id}`).emit('tournament.lobby_ready', {
         tournamentId, gameId: game.id, round: 1,
         opponentId: m.player1Id, opponentUsername: p1Info.username, opponentElo: p1Info.elo,
+        expiresAt: lobbyExpiresAt,
       });
     }
 
@@ -475,7 +477,7 @@ export class TournamentService {
         [tournamentId, game.id, nextRound, m.matchNumber, m.player1Id, m.player2Id],
       );
 
-      await TournamentLobbyService.createLobby(
+      const { expiresAt: lobbyExpiresAt } = await TournamentLobbyService.createLobby(
         game.id, tournamentId, matchRow.id, m.player1Id!, m.player2Id!,
       );
 
@@ -485,6 +487,7 @@ export class TournamentService {
         opponentId:       m.player2Id,
         opponentUsername: p2?.username ?? 'Opponent',
         opponentElo:      p2?.elo ?? 1200,
+        expiresAt:        lobbyExpiresAt,
       });
 
       await NotificationService.send(m.player2Id!, 'tournament_match_ready', { tournamentName: t?.name, round: nextRound });
@@ -493,6 +496,7 @@ export class TournamentService {
         opponentId:       m.player1Id,
         opponentUsername: p1?.username ?? 'Opponent',
         opponentElo:      p1?.elo ?? 1200,
+        expiresAt:        lobbyExpiresAt,
       });
     }
 

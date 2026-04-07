@@ -31,7 +31,7 @@ export class TournamentLobbyService {
     matchId:      string,
     player1Id:    string,
     player2Id:    string,
-  ): Promise<void> {
+  ): Promise<{ expiresAt: number }> {
     const expiresAt = Date.now() + LOBBY_TIMEOUT_MS;
     const meta: LobbyMeta = { tournamentId, matchId, player1Id, player2Id, expiresAt };
     const ttlMs = LOBBY_TIMEOUT_MS + 5_000;
@@ -43,6 +43,7 @@ export class TournamentLobbyService {
     ]);
 
     logger.info(`Tournament lobby created: game=${gameId} tournament=${tournamentId}`);
+    return { expiresAt };
   }
 
   /** Player signals they are in the lobby. Returns true if both players are now present. */

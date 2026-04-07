@@ -20,7 +20,7 @@ import { Deposit }                from './screens/Deposit';
 import { Withdraw }               from './screens/Withdraw';
 import { Profile }                from './screens/Profile';
 import { AdminDashboard }         from './screens/AdminDashboard';
-import { useWebSocket }           from './hooks/useWebSocket';
+import { useWebSocket, onGlobal }  from './hooks/useWebSocket';
 
 const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://toncheckers.pages.dev'}/tonconnect-manifest.json`;
 
@@ -34,26 +34,32 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Global tournament.starting listener — registered at module level so it's
+// never missed regardless of when AppRoutes mounts.
+type StartingPayload = { tournamentId: string; tournamentName: string; expiresAt: number };
+let _startingHandlers: Array<(data: StartingPayload) => void> = [];
+onGlobal<StartingPayload>('tournament.starting', (data) => {
+  _startingHandlers.forEach(h => h(data));
+});
+
 function AppRoutes() {
   const { accessToken, user } = useStore();
   const navigate = useNavigate();
-  const { on } = useWebSocket();
   const postAuthPath = '/';
 
-  const [tournamentPrompts, setTournamentPrompts] = useState<
-    Array<{ tournamentId: string; tournamentName: string; windowSeconds: number }>
-  >([]);
+  const [tournamentPrompts, setTournamentPrompts] = useState<StartingPayload[]>([]);
 
+  // Subscribe this component instance to the global starting events
   useEffect(() => {
-    return on<{ tournamentId: string; tournamentName: string; windowSeconds: number }>(
-      'tournament.starting', (data) => {
-        setTournamentPrompts(prev => {
-          if (prev.find(p => p.tournamentId === data.tournamentId)) return prev;
-          return [...prev, data];
-        });
-      },
-    );
-  }, [on]);
+    const handler = (data: StartingPayload) => {
+      setTournamentPrompts(prev => {
+        if (prev.find(p => p.tournamentId === data.tournamentId)) return prev;
+        return [...prev, data];
+      });
+    };
+    _startingHandlers.push(handler);
+    return () => { _startingHandlers = _startingHandlers.filter(h => h !== handler); };
+  }, []);
 
   function acceptTournament(tournamentId: string) {
     setTournamentPrompts(prev => prev.filter(p => p.tournamentId !== tournamentId));
@@ -79,7 +85,7 @@ function AppRoutes() {
             🏆 {p.tournamentName}
           </p>
           <p style={{ color: 'var(--tg-theme-hint-color)', fontSize: 13, margin: '0 0 12px' }}>
-            Tournament is starting — join the bracket ({p.windowSeconds}s window)
+            Tournament is starting — join the bracket ({Math.max(0, Math.ceil((p.expiresAt - Date.now()) / 1000))}s remaining)
           </p>
           <div style={{ display: 'flex', gap: 10 }}>
             <button onClick={() => acceptTournament(p.tournamentId)} style={{

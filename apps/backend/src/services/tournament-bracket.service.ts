@@ -14,7 +14,7 @@
 import redis from '../config/redis.js';
 import { logger } from '../utils/logger.js';
 
-const WINDOW_MS    = 30_000;
+const WINDOW_MS    = 60_000;
 const META_PREFIX  = 't:bracket:meta:';
 const PRES_PREFIX  = 't:bracket:present:';
 const ACTIVE_SET   = 't:bracket:active_set';
@@ -30,7 +30,7 @@ export class TournamentBracketService {
   static async openWindow(
     tournamentId: string,
     participants: Array<{ userId: string; seedElo: number }>,
-  ): Promise<void> {
+  ): Promise<BracketWindowMeta> {
     const expiresAt = Date.now() + WINDOW_MS;
     const meta: BracketWindowMeta = { tournamentId, expiresAt, participants };
     const ttlMs = WINDOW_MS + 10_000;
@@ -42,6 +42,7 @@ export class TournamentBracketService {
     ]);
 
     logger.info(`Bracket window opened: tournament=${tournamentId} participants=${participants.length}`);
+    return meta;
   }
 
   static async playerJoined(tournamentId: string, userId: string): Promise<boolean> {

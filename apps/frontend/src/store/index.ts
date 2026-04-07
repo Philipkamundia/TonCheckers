@@ -26,6 +26,7 @@ export interface TournamentLobbyPayload {
   opponentId:       string;
   opponentUsername: string;
   opponentElo:      number;
+  expiresAt:        number; // unix ms — source of truth for countdown
 }
 
 interface AppStore {

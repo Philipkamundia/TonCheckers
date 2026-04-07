@@ -44,6 +44,7 @@ export function TournamentDetail() {
   const [statusMsg,        setStatusMsg]        = useState<string | null>(null);
   const [phase,            setPhase]            = useState<BracketPhase>('open');
   const [phaseCountdown,   setPhaseCountdown]   = useState<number>(0);
+  const [bracketExpiresAt, setBracketExpiresAt] = useState<number | null>(null);
 
   // Pending lobby payload — held during match_preview phase
   const pendingLobbyRef = useRef<TournamentLobbyPayload | null>(null);
@@ -64,33 +65,43 @@ export function TournamentDetail() {
     emit('tournament.bracket_join', { tournamentId: id });
   }, [id]);
 
-  // Detect presence window from tournament state
+  // Detect presence window — set countdown from server expiresAt
   useEffect(() => {
     if (!tournament) return;
     if (tournament.status === 'in_progress' && tournament.currentRound === 0) {
       setPhase('presence');
-      setPhaseCountdown(30);
+      // If we don't have expiresAt yet (e.g. page refresh), default to 30s from now
+      if (!bracketExpiresAt) {
+        setPhaseCountdown(30);
+      }
     } else if (tournament.status === 'open') {
       setPhase('open');
     }
   }, [tournament?.status, tournament?.currentRound]);
 
-  // Countdown ticker — drives presence (30s), match_preview (10s), complete_preview (10s)
+  // Countdown ticker — drives presence (server expiresAt), match_preview (10s), complete_preview (10s)
   useEffect(() => {
     if (!['presence', 'match_preview', 'complete_preview'].includes(phase)) return;
     if (phaseCountdown <= 0) return;
 
+    const expiresAt = phase === 'presence' ? bracketExpiresAt : null;
+
     const timer = setInterval(() => {
-      setPhaseCountdown(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1_000);
+      if (expiresAt) {
+        // Server-driven: calculate from actual deadline
+        const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+        setPhaseCountdown(remaining);
+        if (remaining <= 0) clearInterval(timer);
+      } else {
+        // Client-driven for fixed phases (match_preview, complete_preview)
+        setPhaseCountdown(prev => {
+          if (prev <= 1) { clearInterval(timer); return 0; }
+          return prev - 1;
+        });
+      }
+    }, 500);
     return () => clearInterval(timer);
-  }, [phase]);
+  }, [phase, bracketExpiresAt]);
 
   // When match_preview countdown hits 0 → go to lobby
   useEffect(() => {
@@ -117,6 +128,14 @@ export function TournamentDetail() {
   // Live WS events
   useEffect(() => {
     const unsubs = [
+      on<{ tournamentId: string; expiresAt: number }>('tournament.starting', (data) => {
+        if (data.tournamentId !== id) return;
+        setBracketExpiresAt(data.expiresAt);
+        const remaining = Math.max(0, Math.ceil((data.expiresAt - Date.now()) / 1000));
+        setPhase('presence');
+        setPhaseCountdown(remaining);
+      }),
+
       on<TournamentLobbyPayload>('tournament.lobby_ready', (data) => {
         if (data.tournamentId !== id) return;
         haptic.impact('medium');
