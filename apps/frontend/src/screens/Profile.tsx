@@ -69,8 +69,8 @@ export function Profile() {
 
   async function handleDisconnect() {
     haptic.impact('medium');
+    logout(); // clear store first so WalletGate doesn't auto-auth on wallet state change
     await tonConnectUI.disconnect();
-    logout();
     navigate('/connect', { replace: true });
   }
 

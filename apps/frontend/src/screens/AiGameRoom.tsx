@@ -26,6 +26,24 @@ export function AiGameRoom() {
   const [invalid,    setInvalid]    = useState<string | null>(null);
   const [aiThinking, setAiThinking] = useState(false);
   const [tip,        setTip]        = useState<{ from: { row: number; col: number }; to: { row: number; col: number } } | null>(null);
+  const [aiPiece,    setAiPiece]    = useState<{ from: { row: number; col: number }; to: { row: number; col: number } } | null>(null);
+
+  // Client-side countdown — ticks every second when it's the human's turn
+  useEffect(() => {
+    if (aiThinking || gameOver || !board) return;
+    const interval = setInterval(() => {
+      setRemainingMs(prev => {
+        const next = Math.max(0, prev - 1000);
+        if (next === 0) {
+          // Time's up — AI wins
+          setGameOver({ result: 'loss', winner: 2, reason: 'timeout' });
+          haptic.warning();
+        }
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [aiThinking, gameOver, board]);
 
   useEffect(() => { return showBackButton(() => navigate('/ai')); }, []);
 
@@ -36,8 +54,17 @@ export function AiGameRoom() {
   useEffect(() => {
     const unsubs = [
       on<{ board: Board; remainingMs: number }>('ai.move_ok', (data) => {
-        setBoard(data.board);
-        setRemainingMs(data.remainingMs);
+        // Show AI piece highlight briefly before updating board
+        if (data.aiMove) {
+          setAiPiece(data.aiMove as any);
+          setTimeout(() => {
+            setBoard(data.board);
+            setAiPiece(null);
+          }, 600);
+        } else {
+          setBoard(data.board);
+        }
+        setRemainingMs(data.remainingMs ?? 30_000);
         setSelected(null);
         setTip(null);
         setAiThinking(false);
@@ -150,12 +177,16 @@ export function AiGameRoom() {
             const canMove = movablePieces.has(key);
             const isTipFrom = tip?.from.row === row && tip?.from.col === col;
             const isTipTo   = tip?.to.row   === row && tip?.to.col   === col;
+            const isAiFrom  = aiPiece?.from.row === row && aiPiece?.from.col === col;
+            const isAiTo    = aiPiece?.to.row   === row && aiPiece?.to.col   === col;
 
             let bg = dark ? '#795548' : '#EFEBE9';
             if (isSel)           bg = '#FFF9C4';
             else if (isDest)     bg = '#A5D6A7';
             else if (isTipFrom)  bg = '#FFE082';
             else if (isTipTo)    bg = '#80DEEA';
+            else if (isAiFrom)   bg = '#EF9A9A';  // red tint — AI piece origin
+            else if (isAiTo)     bg = '#CE93D8';  // purple tint — AI piece destination
             else if (dark && canMove && !selected) bg = '#8D6E63';
 
             return (

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { useTelegram } from '../hooks/useTelegram';
+import { useStore } from '../store';
 import { balanceApi } from '../services/api';
 
 function toNano(ton: number): string { return Math.round(ton * 1_000_000_000).toString(); }
@@ -56,6 +57,7 @@ const PRESETS = [0.5, 1, 2, 5, 10];
 
 export function Deposit() {
   const { showBackButton, hideMainButton, haptic } = useTelegram();
+  const { setBalance } = useStore();
   const [tonConnectUI] = useTonConnectUI();
   const navigate = useNavigate();
 
@@ -116,6 +118,7 @@ export function Deposit() {
           const newBalance = parseFloat(r.data.balance.available);
           if (newBalance > initialBalance) {
             setConfirmed(true);
+            setBalance(r.data.balance);  // auto-update store balance
             clearInterval(poll);
           }
         } catch { /* ignore */ }

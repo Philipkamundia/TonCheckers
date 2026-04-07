@@ -94,7 +94,7 @@ export function registerAiGameHandlers(io: Server, socket: Socket): void {
         board:        result.newState?.board,
         aiMove:       result.aiMove,
         activePlayer: 1,
-        remainingMs:  30_000,
+        remainingMs:  30_000,  // timer resets to 30s for human's next turn
       });
 
     } catch (err) {

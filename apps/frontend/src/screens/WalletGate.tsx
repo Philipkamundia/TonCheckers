@@ -15,15 +15,17 @@ import { authApi } from '../services/api';
 
 export function WalletGate({ onConnected }: { onConnected: () => void }) {
   const { initData, haptic, hideMainButton } = useTelegram();
-  const { setUser, setTokens } = useStore();
+  const { setUser, setTokens, accessToken } = useStore();
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
   const [tonConnectUI] = useTonConnectUI();
   const wallet = useTonWallet();
 
-  // Auto-authenticate when wallet connects
+  // Auto-authenticate when wallet connects — but only if not in a logged-out state
   useEffect(() => {
     if (!wallet) { hideMainButton(); return; }
+    // If accessToken exists, user is already authenticated — don't re-auth
+    if (accessToken) return;
     doAuth(wallet, initData);
   }, [wallet]);
 
