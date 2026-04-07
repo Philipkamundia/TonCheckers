@@ -59,7 +59,8 @@ export const useStore = create<AppStore>((set, get) => ({
   logout: () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
-    set({ user: null, balance: null, accessToken: null, activeGameId: null, myPlayerNum: null, hydrated: false });
+    set({ user: null, balance: null, accessToken: null, activeGameId: null, myPlayerNum: null });
+    // Note: hydrated stays true so the app doesn't show a blank screen
   },
   hydrate: async () => {
     if (!get().accessToken) { set({ hydrated: true }); return; }
