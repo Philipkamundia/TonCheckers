@@ -33,8 +33,18 @@ export class BracketService {
     players:     BracketPlayer[],
     bracketSize: number,
   ): { matches: BracketMatch[]; byePlayers: string[] } {
-    const sorted     = [...players].sort((a, b) => b.seedElo - a.seedElo);
-    const byeCount   = Math.max(0, bracketSize - sorted.length);
+    const sorted = [...players].sort((a, b) => b.seedElo - a.seedElo);
+    const n      = sorted.length;
+
+    // byeCount = how many top-seeded players skip R1.
+    // Rules:
+    //   1. Never more byes than (n - 2), so at least 2 players always play R1.
+    //   2. r1Players count (n - byeCount) must be even so everyone is paired.
+    let byeCount = Math.max(0, bracketSize - n);
+    byeCount     = Math.min(byeCount, n - 2);          // rule 1
+    if ((n - byeCount) % 2 !== 0) byeCount--;          // rule 2 — reduce by 1 to make even
+    byeCount     = Math.max(0, byeCount);               // clamp to 0
+
     const byePlayers = sorted.slice(0, byeCount).map(p => p.userId);
     const r1Players  = sorted.slice(byeCount);
 
