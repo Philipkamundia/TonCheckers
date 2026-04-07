@@ -83,7 +83,7 @@ export class SettlementService {
       const { rowCount } = await client.query(
         `UPDATE games SET
            status='completed',
-           result=CASE WHEN player1_id=$1 THEN 'player1_win' ELSE 'player2_win' END,
+           result=(CASE WHEN player1_id=$1 THEN 'player1_win' ELSE 'player2_win' END)::game_result,
            platform_fee=$2, winner_payout=$3,
            player1_elo_after=CASE WHEN player1_id=$1 THEN $4 ELSE $5 END,
            player2_elo_after=CASE WHEN player1_id=$1 THEN $5 ELSE $4 END,
@@ -204,7 +204,7 @@ export class SettlementService {
       await client.query('BEGIN');
 
       const { rowCount } = await client.query(
-        `UPDATE games SET status='completed', result='draw',
+        `UPDATE games SET status='completed', result='draw'::game_result,
            player1_elo_after=player1_elo_before, player2_elo_after=player2_elo_before,
            platform_fee=0, winner_payout=0, ended_at=NOW(), updated_at=NOW()
          WHERE id=$1 AND status='active'`,

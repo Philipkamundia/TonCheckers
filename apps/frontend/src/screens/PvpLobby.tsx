@@ -118,6 +118,24 @@ export function PvpLobby() {
           <p style={styles.hint}>
             Win: <strong>{(parseFloat(finalStake) * 2 * 0.85).toFixed(2)} TON</strong> (after 15% fee)
           </p>
+
+          {/* Game rules */}
+          <div style={styles.rulesCard}>
+            <p style={styles.rulesTitle}>📋 Game Rules</p>
+            {[
+              { icon: '⚔️', rule: 'Mandatory capture — if a jump is available, you must take it' },
+              { icon: '🔗', rule: 'Maximum capture — take the longest capture chain available' },
+              { icon: '👑', rule: 'Kings move one square diagonally in any direction' },
+              { icon: '🦘', rule: 'Kings can fly to capture, but land on the adjacent square' },
+              { icon: '⏱', rule: '30 seconds per move — time out and you lose' },
+              { icon: '🔄', rule: 'Three-fold repetition results in a draw' },
+            ].map(({ icon, rule }) => (
+              <div key={rule} style={styles.ruleRow}>
+                <span style={styles.ruleIcon}>{icon}</span>
+                <span style={styles.ruleText}>{rule}</span>
+              </div>
+            ))}
+          </div>
         </>
       ) : (
         <div style={styles.queueBox}>
@@ -139,7 +157,12 @@ const styles: Record<string, React.CSSProperties> = {
   preset:      { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:10, padding:'10px 16px', color:'var(--tg-theme-text-color)', fontSize:15, cursor:'pointer' },
   presetActive:{ background:'#2AABEE', color:'#fff' },
   input:       { width:'100%', background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'14px', fontSize:16, color:'var(--tg-theme-text-color)', boxSizing:'border-box', marginBottom:12 },
-  hint:        { color:'var(--tg-theme-hint-color)', fontSize:13, textAlign:'center' },
+  hint:        { color:'var(--tg-theme-hint-color)', fontSize:13, textAlign:'center', marginBottom:16 },
+  rulesCard:   { background:'var(--tg-theme-secondary-bg-color)', borderRadius:14, padding:'14px 16px', marginBottom:80 },
+  rulesTitle:  { color:'var(--tg-theme-text-color)', fontSize:14, fontWeight:600, margin:'0 0 10px' },
+  ruleRow:     { display:'flex', alignItems:'flex-start', gap:10, padding:'6px 0', borderBottom:'1px solid rgba(128,128,128,0.08)' },
+  ruleIcon:    { fontSize:16, flexShrink:0, marginTop:1 },
+  ruleText:    { color:'var(--tg-theme-hint-color)', fontSize:13, lineHeight:1.4 },
   error:       { color:'var(--tg-theme-destructive-text-color)', fontSize:13 },
   queueBox:    { display:'flex', flexDirection:'column', alignItems:'center', paddingTop:40, gap:12 },
   radar:       { fontSize:48, animation:'pulse 1.5s infinite' },

@@ -55,8 +55,7 @@ export function startTimerCheckJob(io: Server): ReturnType<typeof setInterval> {
         );
         if (result.alreadySettled) { GameRoomManager.remove(gameId); continue; }
 
-        io.to(`game:${gameId}`).emit('game.tick', { gameId, remainingMs: 0 });
-        io.to(`game:${gameId}`).emit('game.end', {
+        const endPayload = {
           gameId,
           result:        'win',
           winner:        timedOutPlayer === 1 ? 2 : 1,
@@ -69,7 +68,14 @@ export function startTimerCheckJob(io: Server): ReturnType<typeof setInterval> {
           prizePool:     result.prizePool,
           stake:         result.stake,
           eloChanges:    result.eloChanges,
-        });
+        };
+
+        io.to(`game:${gameId}`).emit('game.tick', { gameId, remainingMs: 0 });
+        io.to(`game:${gameId}`).emit('game.end', endPayload);
+
+        // Also emit directly to user rooms as fallback in case socket isn't in game room
+        io.to(`user:${game.player1Id}`).emit('game.end', endPayload);
+        if (game.player2Id) io.to(`user:${game.player2Id}`).emit('game.end', endPayload);
 
         GameRoomManager.remove(gameId);
         logger.info(`Timeout: game=${gameId} timedOut=player${timedOutPlayer}`);
