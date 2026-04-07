@@ -18,13 +18,14 @@ import type { Server } from 'socket.io';
 const PLATFORM_FEE_PCT = 0.15;
 
 export interface SettlementResult {
-  gameId:       string;
-  winnerId:     string;
-  loserId:      string;
-  stake:        string;
-  prizePool:    string;
-  platformFee:  string;
-  winnerPayout: string;
+  gameId:          string;
+  winnerId:        string;
+  loserId:         string;
+  stake:           string;
+  prizePool:       string;
+  platformFee:     string;
+  winnerPayout:    string;
+  alreadySettled?: boolean;  // true when game was already settled by another path
   eloChanges: {
     winner: { before: number; after: number; delta: number };
     loser:  { before: number; after: number; delta: number };
@@ -92,11 +93,11 @@ export class SettlementService {
       );
 
       if (!rowCount) {
-        // Game already settled — bail out cleanly
         await client.query('ROLLBACK');
         logger.warn(`settleWin: game=${gameId} already settled, skipping`);
         return {
           gameId, winnerId, loserId, stake: stakeEach, prizePool, platformFee, winnerPayout,
+          alreadySettled: true,
           eloChanges: {
             winner: { before: winnerRow.elo, after: winnerRow.elo, delta: 0 },
             loser:  { before: loserRow.elo,  after: loserRow.elo,  delta: 0 },

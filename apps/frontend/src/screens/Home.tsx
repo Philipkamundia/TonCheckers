@@ -56,6 +56,12 @@ export function Home() {
         <button style={styles.walletBtn} onClick={() => navigate('/deposit')}>Deposit</button>
         <button style={styles.walletBtn} onClick={() => navigate('/withdraw')}>Withdraw</button>
       </div>
+
+      {/* Community link */}
+      <a href="https://t.me/toncheckersApp" target="_blank" rel="noopener noreferrer" style={styles.communityLink}>
+        <span style={styles.tgIcon}>✈️</span>
+        <span>Join TonCheckers Community</span>
+      </a>
     </div>
   );
 }
@@ -74,23 +80,25 @@ function ModeCard({ emoji, title, subtitle, onClick, primary }: {
 
 const styles: Record<string, React.CSSProperties> = {
   container:    { padding:'16px', background:'var(--tg-theme-bg-color)', minHeight:'100vh' },
-  topBar:       { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 },
+  topBar:       { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 },
   greeting:     { color:'var(--tg-theme-hint-color)', fontSize:13, margin:0 },
   profileBtn:   { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:'50%', width:36, height:36, fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
-  balanceCard:  { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:20, marginBottom:20 },
+  balanceCard:  { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:16, marginBottom:12 },
   balanceRow:   { display:'flex', justifyContent:'space-between', alignItems:'center' },
   balanceLabel: { color:'var(--tg-theme-hint-color)', fontSize:14 },
-  balanceValue: { color:'var(--tg-theme-text-color)', fontSize:28, fontWeight:700 },
+  balanceValue: { color:'var(--tg-theme-text-color)', fontSize:26, fontWeight:700 },
   lockedText:   { color:'var(--tg-theme-hint-color)', fontSize:12, margin:'4px 0 0' },
-  eloRow:       { display:'flex', justifyContent:'space-between', marginTop:12 },
+  eloRow:       { display:'flex', justifyContent:'space-between', marginTop:10 },
   eloLabel:     { color:'var(--tg-theme-hint-color)', fontSize:13 },
   eloValue:     { color:'#2AABEE', fontSize:16, fontWeight:600 },
-  grid:         { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 },
-  modeCard:     { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:16, padding:'20px 12px', display:'flex', flexDirection:'column', alignItems:'center', gap:4, cursor:'pointer', textAlign:'center' },
+  grid:         { display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 },
+  modeCard:     { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:14, padding:'14px 12px', display:'flex', flexDirection:'column', alignItems:'center', gap:3, cursor:'pointer', textAlign:'center' },
   primaryCard:  { background:'#2AABEE', gridColumn:'1 / -1' },
-  modeEmoji:    { fontSize:28 },
-  modeTitle:    { color:'var(--tg-theme-text-color)', fontWeight:600, fontSize:15 },
-  modeSubtitle: { color:'var(--tg-theme-hint-color)', fontSize:12 },
-  walletRow:    { display:'flex', gap:12 },
-  walletBtn:    { flex:1, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'14px', color:'var(--tg-theme-text-color)', fontSize:15, fontWeight:500, cursor:'pointer' },
+  modeEmoji:    { fontSize:24 },
+  modeTitle:    { color:'var(--tg-theme-text-color)', fontWeight:600, fontSize:14 },
+  modeSubtitle: { color:'var(--tg-theme-hint-color)', fontSize:11 },
+  walletRow:    { display:'flex', gap:10, marginBottom:10 },
+  walletBtn:    { flex:1, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'12px', color:'var(--tg-theme-text-color)', fontSize:14, fontWeight:500, cursor:'pointer' },
+  communityLink:{ display:'flex', alignItems:'center', justifyContent:'center', gap:8, color:'#2AABEE', fontSize:13, fontWeight:500, textDecoration:'none', padding:'8px 0' },
+  tgIcon:       { fontSize:16 },
 };

@@ -61,24 +61,23 @@ export class TournamentService {
     if (!t) throw new AppError(404, 'Tournament not found', 'NOT_FOUND');
     if (t.status !== 'open') throw new AppError(400, 'Tournament is not accepting registrations', 'TOURNAMENT_CLOSED');
 
-    // Check not already joined
+    // Check not already joined (fast pre-check before acquiring locks)
     const { rows: existing } = await pool.query(
       'SELECT 1 FROM tournament_participants WHERE tournament_id=$1 AND user_id=$2',
       [tournamentId, userId],
     );
     if (existing.length) throw new AppError(409, 'Already registered', 'ALREADY_REGISTERED');
 
-    // Deduct entry fee before transaction (throws if insufficient)
-    const fee = parseFloat(t.entryFee);
-    if (fee > 0) await BalanceService.deductBalance(userId, t.entryFee);
-
     const { rows: [user] } = await pool.query('SELECT elo FROM users WHERE id=$1', [userId]);
+    const fee = parseFloat(t.entryFee);
 
+    // Everything in one transaction: capacity check + balance deduction + participant insert
+    // This eliminates the window where balance is deducted but join fails with no recovery.
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Lock the tournament row and recheck bracket capacity atomically
+      // Lock tournament row and recheck capacity atomically
       const { rows: [locked] } = await client.query(
         `SELECT bracket_size,
                 (SELECT COUNT(*)::int FROM tournament_participants WHERE tournament_id=$1) AS participant_count
@@ -87,10 +86,24 @@ export class TournamentService {
       );
       if (locked.participant_count >= locked.bracket_size) {
         await client.query('ROLLBACK');
-        if (fee > 0) await BalanceService.creditBalance(userId, t.entryFee);
         throw new AppError(400, 'Tournament is full', 'TOURNAMENT_FULL');
       }
 
+      // Deduct entry fee inside the transaction — if anything below fails, this rolls back too
+      if (fee > 0) {
+        const { rowCount } = await client.query(
+          `UPDATE balances
+           SET available = available - $1::numeric, updated_at = NOW()
+           WHERE user_id = $2 AND available >= $1::numeric`,
+          [t.entryFee, userId],
+        );
+        if (!rowCount) {
+          await client.query('ROLLBACK');
+          throw new AppError(400, 'Insufficient balance', 'INSUFFICIENT_BALANCE');
+        }
+      }
+
+      // Insert participant
       await client.query(
         `INSERT INTO tournament_participants (tournament_id, user_id, seed_elo)
          VALUES ($1,$2,$3)`,
@@ -98,17 +111,16 @@ export class TournamentService {
       );
 
       // Add entry fee to prize pool
-      await client.query(
-        `UPDATE tournaments SET prize_pool=prize_pool+$1::numeric, updated_at=NOW() WHERE id=$2`,
-        [t.entryFee, tournamentId],
-      );
+      if (fee > 0) {
+        await client.query(
+          `UPDATE tournaments SET prize_pool=prize_pool+$1::numeric, updated_at=NOW() WHERE id=$2`,
+          [t.entryFee, tournamentId],
+        );
+      }
 
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
-      if (fee > 0 && !(err instanceof AppError && err.code === 'TOURNAMENT_FULL')) {
-        await BalanceService.creditBalance(userId, t.entryFee);
-      }
       throw err;
     } finally {
       client.release();
@@ -487,6 +499,11 @@ export class TournamentService {
     });
 
     logger.info(`Tournament complete: ${tournamentId} winner=${winnerId} payout=${winnerPayout}`);
+  }
+
+  /** Public entry point for the recovery job to re-run a stuck round check */
+  static async recoverStuckRound(tournamentId: string, round: number, io: Server): Promise<void> {
+    await TournamentService.checkRoundComplete(tournamentId, round, io);
   }
 
   // ─── Cancel ───────────────────────────────────────────────────────────────

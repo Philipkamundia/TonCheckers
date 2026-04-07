@@ -203,18 +203,6 @@ export class AuthService {
     return (rows[0] as UserProfile) ?? null;
   }
 
-  static async findByTelegramId(telegramId: string): Promise<UserProfile | null> {
-    const { rows } = await pool.query(
-      `SELECT id, wallet_address AS "walletAddress", username, elo,
-              games_played  AS "gamesPlayed",  games_won  AS "gamesWon",
-              games_lost    AS "gamesLost",    games_drawn AS "gamesDrawn",
-              total_won::text AS "totalWon",   created_at  AS "createdAt"
-       FROM users WHERE telegram_id = $1`,
-      [telegramId],
-    );
-    return (rows[0] as UserProfile) ?? null;
-  }
-
   static async findById(userId: string): Promise<UserProfile | null> {
     const { rows } = await pool.query(
       `SELECT id, wallet_address AS "walletAddress", username, elo,
@@ -279,14 +267,15 @@ export class AuthService {
       throw new AppError(401, `Invalid initData: ${initResult.error}`, 'INIT_DATA_INVALID');
     }
 
-    // Check if user already exists — existing users don't need proof re-verification
+    // Check by wallet — each wallet gets its own account
     const existingUser = await AuthService.findByWallet(walletAddress);
     if (existingUser) {
+      // Returning user — proof not required, JWT is the session credential
       const tokens = AuthService.issueTokens(existingUser.id, walletAddress);
       return { user: existingUser, tokens, isNew: false };
     }
 
-    // New user — proof required to register
+    // New wallet — proof required to prove ownership before creating account
     const proofValid = await AuthService.verifyTonConnectProof(walletAddress, proof);
     if (!proofValid) {
       throw new AppError(401, 'Invalid TonConnect proof — please reconnect your wallet', 'PROOF_INVALID');
@@ -307,26 +296,15 @@ export class AuthService {
       throw new AppError(401, `Invalid initData: ${initResult.error}`, 'INIT_DATA_INVALID');
     }
 
-    // Check by wallet first
-    let user = await AuthService.findByWallet(walletAddress);
+    // Check by wallet — each wallet address is its own account
+    const user = await AuthService.findByWallet(walletAddress);
     if (user) {
       const tokens = AuthService.issueTokens(user.id, walletAddress);
       return { user, tokens, isNew: false };
     }
 
-    // Same Telegram account connecting a different wallet — return existing account
-    if (initResult.telegramId) {
-      const existingByTelegram = await AuthService.findByTelegramId(initResult.telegramId);
-      if (existingByTelegram) {
-        const tokens = AuthService.issueTokens(existingByTelegram.id, existingByTelegram.walletAddress);
-        return { user: existingByTelegram, tokens, isNew: false };
-      }
-    }
-
-    // New user — create account
-    user = await AuthService.createUser(walletAddress, initResult.telegramId);
-    const tokens = AuthService.issueTokens(user.id, walletAddress);
-    return { user, tokens, isNew: true };
+    // New wallet with no proof — must use /auth/connect with tonProof to register
+    throw new AppError(401, 'Wallet not registered — please reconnect your wallet to verify ownership', 'USER_NOT_FOUND');
   }
 
   /** POST /auth/refresh — new access token from refresh token */

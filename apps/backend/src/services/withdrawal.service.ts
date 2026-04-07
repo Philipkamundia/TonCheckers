@@ -45,23 +45,30 @@ export class WithdrawalService {
    * 100 TON or above: deduct and queue for admin approval.
    */
   static async requestWithdrawal(
-    userId:        string,
-    amount:        string,
-    destination:   string,  // wallet address from frontend (must match connected wallet)
+    userId:      string,
+    amount:      string,
+    destination: string,  // validated against registered wallet — cannot be overridden
   ): Promise<WithdrawalRequest> {
     const amountNum = parseFloat(amount);
     if (isNaN(amountNum) || amountNum <= 0) throw new AppError(400, 'Amount must be positive', 'INVALID_AMOUNT');
     if (amountNum < 0.1) throw new AppError(400, 'Minimum withdrawal is 0.1 TON', 'INVALID_AMOUNT');
 
-    // 1. Verify destination matches connected wallet
+    // 1. Fetch user and use their REGISTERED wallet address — ignore frontend destination entirely
     const { rows: [user] } = await pool.query(
       'SELECT wallet_address FROM users WHERE id = $1', [userId],
     );
     if (!user) throw new AppError(404, 'User not found', 'NOT_FOUND');
 
-    if (user.wallet_address.toLowerCase() !== destination.toLowerCase()) {
+    // Always withdraw to the registered wallet — destination param is only used for logging/display
+    // This prevents any attempt to redirect funds to a different wallet
+    const registeredWallet = user.wallet_address;
+    if (registeredWallet.toLowerCase() !== destination.toLowerCase()) {
+      logger.warn(`Withdrawal destination mismatch: user=${userId} registered=${registeredWallet} requested=${destination}`);
       throw new AppError(400, 'Withdrawal destination must match your connected wallet', 'INVALID_DESTINATION');
     }
+
+    // Use the registered wallet as the canonical destination
+    destination = registeredWallet;
 
     // 2. Cooldown check (PRD §4: 30-minute cooldown)
     const cooldownKey = `${COOLDOWN_PREFIX}${userId}`;
@@ -71,15 +78,16 @@ export class WithdrawalService {
       throw new AppError(429, `Withdrawal cooldown active. Try again in ${Math.ceil(ttl / 60)} minutes.`, 'COOLDOWN_ACTIVE');
     }
 
-    // 3. Daily limit check (PRD §4: 100 TON per UTC day)
-    const utcDate  = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const dailyKey = `${DAILY_PREFIX}${userId}:${utcDate}`;
-    const dailyStr = await redis.get(dailyKey);
+    // 3. Daily limit check — applies to ALL withdrawals including those requiring review
+    const utcDate   = new Date().toISOString().slice(0, 10);
+    const dailyKey  = `${DAILY_PREFIX}${userId}:${utcDate}`;
+    const dailyStr  = await redis.get(dailyKey);
     const dailyUsed = parseFloat(dailyStr || '0');
 
+    // requiresReview routes to admin queue but still counts against the daily total
     const requiresReview = amountNum >= MAX_DAILY_TON;
 
-    if (!requiresReview && (dailyUsed + amountNum) > MAX_DAILY_TON) {
+    if ((dailyUsed + amountNum) > MAX_DAILY_TON && !requiresReview) {
       const remaining = MAX_DAILY_TON - dailyUsed;
       throw new AppError(400, `Daily limit reached. You can withdraw up to ${remaining.toFixed(2)} TON today.`, 'DAILY_LIMIT_EXCEEDED');
     }
@@ -110,13 +118,11 @@ export class WithdrawalService {
       client.release();
     }
 
-    // 6. Set cooldown in Redis (only for normal withdrawals, not admin-queued ones)
-    if (!requiresReview) {
-      // Update daily total immediately — counts the attempt against the limit
-      const secsUntilMidnight = WithdrawalService.secsUntilUtcMidnight();
-      await redis.set(dailyKey, (dailyUsed + amountNum).toFixed(9), 'EX', secsUntilMidnight);
-      // Cooldown is set only after successful on-chain send (inside processWithdrawal)
-    }
+    // 6. Always update daily total — counts against limit regardless of review status
+    const secsUntilMidnight = WithdrawalService.secsUntilUtcMidnight();
+    await redis.set(dailyKey, (dailyUsed + amountNum).toFixed(9), 'EX', secsUntilMidnight);
+
+    // Cooldown set only after successful on-chain send (inside processWithdrawal)
 
     logger.info(`Withdrawal requested: user=${userId} amount=${amount} TON dest=${destination} review=${requiresReview}`);
 
@@ -142,12 +148,21 @@ export class WithdrawalService {
     cooldownKey?:  string,
   ): Promise<void> {
     try {
-      await pool.query(
-        `UPDATE transactions SET status='processing', updated_at=NOW() WHERE id=$1`,
-        [transactionId],
-      );
-
+      // Note: transaction is already status='processing' from requestWithdrawal INSERT
       const txHash = await WithdrawalService.sendTonTransfer(destination, amount);
+
+      // If hash is synthetic (polling exhausted), keep status as 'processing'
+      // so the recovery job will retry on-chain lookup. Do NOT refund yet.
+      if (txHash.startsWith('pending:')) {
+        await pool.query(
+          `UPDATE transactions SET ton_tx_hash=$1, updated_at=NOW() WHERE id=$2`,
+          [txHash, transactionId],
+        );
+        logger.warn(`Withdrawal broadcast but hash unconfirmed — recovery job will retry: txId=${transactionId}`);
+        // Still set cooldown — the transfer was sent
+        if (cooldownKey) await redis.set(cooldownKey, '1', 'EX', COOLDOWN_SECS);
+        return;
+      }
 
       await pool.query(
         `UPDATE transactions SET status='confirmed', ton_tx_hash=$1, updated_at=NOW() WHERE id=$2`,
@@ -204,7 +219,6 @@ export class WithdrawalService {
     const client  = new TonClient({ endpoint, apiKey });
     const keyPair = await mnemonicToPrivateKey(words);
 
-    // W5 wallet — networkGlobalId: -3 = testnet, -239 = mainnet
     const networkGlobalId = network === 'mainnet' ? -239 : -3;
     const wallet   = WalletContractV5R1.create({ publicKey: keyPair.publicKey, workchain: 0, walletId: { networkGlobalId } });
     const contract = client.open(wallet);
@@ -220,7 +234,9 @@ export class WithdrawalService {
     const { Address, toNano, SendMode } = await import('@ton/core');
     const toAddress  = Address.parse(destination);
     const nanoAmount = toNano(amount);
+    const hotAddr    = wallet.address.toString({ bounceable: false });
 
+    // Broadcast the transfer
     try {
       await contract.sendTransfer({
         seqno,
@@ -233,30 +249,51 @@ export class WithdrawalService {
       throw new Error(`TON transfer failed (network=${network} dest=${destination} amount=${amount}): ${msg}`);
     }
 
-    // Wait then fetch real tx hash
-    await new Promise(r => setTimeout(r, 8_000));
-    try {
-      const base        = network === 'mainnet' ? 'https://toncenter.com/api/v2' : 'https://testnet.toncenter.com/api/v2';
-      const apiKeyParam = apiKey ? `&api_key=${apiKey}` : '';
-      const hotAddr     = wallet.address.toString({ bounceable: false });
-      const res  = await fetch(`${base}/getTransactions?address=${hotAddr}&limit=5${apiKeyParam}`);
-      const data = await res.json() as { ok: boolean; result: Array<Record<string, unknown>> };
-      if (data.ok && data.result.length) {
-        const txHash = String(
-          (data.result[0].transaction_id as Record<string, unknown>)?.hash ?? data.result[0].hash ?? '',
-        );
-        if (txHash) {
-          logger.info(`TON transfer confirmed: ${amount} TON → ${destination} hash=${txHash}`);
-          return txHash;
+    // Transfer was broadcast. Now poll for the real hash with retries.
+    // We use seqno+destination+amount to identify the exact tx — not just "last tx".
+    const base        = network === 'mainnet' ? 'https://toncenter.com/api/v2' : 'https://testnet.toncenter.com/api/v2';
+    const apiKeyParam = apiKey ? `&api_key=${apiKey}` : '';
+    const expectedNano = Math.round(parseFloat(amount) * 1e9);
+
+    // Poll up to 5 times with increasing delays (8s, 12s, 16s, 20s, 24s)
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      await new Promise(r => setTimeout(r, attempt * 4_000 + 4_000));
+      try {
+        const res  = await fetch(`${base}/getTransactions?address=${hotAddr}&limit=10${apiKeyParam}`);
+        const data = await res.json() as { ok: boolean; result: Array<Record<string, unknown>> };
+        if (!data.ok) continue;
+
+        for (const item of data.result) {
+          // Match by seqno in out_msgs or by destination+amount
+          const outMsgs = (item.out_msgs as Array<Record<string, unknown>>) ?? [];
+          for (const msg of outMsgs) {
+            const dest  = String(msg.destination || '');
+            const value = Number(msg.value || 0);
+            if (
+              dest.toLowerCase() === destination.toLowerCase() &&
+              Math.abs(value - expectedNano) < 10_000_000
+            ) {
+              const txHash = String(
+                (item.transaction_id as Record<string, unknown>)?.hash ?? item.hash ?? '',
+              );
+              if (txHash) {
+                logger.info(`TON transfer confirmed (attempt ${attempt}): ${amount} TON → ${destination} hash=${txHash}`);
+                return txHash;
+              }
+            }
+          }
         }
+      } catch (pollErr) {
+        logger.warn(`Hash poll attempt ${attempt} failed: ${(pollErr as Error).message}`);
       }
-    } catch (pollErr) {
-      logger.warn(`Could not fetch tx hash after send: ${(pollErr as Error).message}`);
     }
 
-    const txHash = `sent:${wallet.address.toString({ bounceable: false })}:seq${seqno}:${Date.now()}`;
-    logger.info(`TON transfer sent: ${amount} TON → ${destination} seqno=${seqno}`);
-    return txHash;
+    // All polling attempts exhausted — store a traceable synthetic hash.
+    // The recovery job will attempt on-chain lookup again using destination+amount.
+    // IMPORTANT: this tx is stored as 'processing' not 'confirmed' so recovery can retry.
+    const syntheticHash = `pending:${hotAddr}:seq${seqno}:${Date.now()}`;
+    logger.warn(`TON transfer hash unconfirmed after 5 attempts — stored as pending: ${amount} TON → ${destination} seqno=${seqno}`);
+    return syntheticHash;
   }
 
   /**

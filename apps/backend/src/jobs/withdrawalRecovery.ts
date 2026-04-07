@@ -3,19 +3,19 @@
  *
  * Finds transactions stuck in 'processing' for > 10 minutes.
  * Attempts to confirm by checking TON Center for the tx on-chain.
- * If unconfirmable, refunds atomically — status + balance update in one DB transaction.
  *
- * Idempotency:
- * - Query filters status='processing' AND refunded_at IS NULL
- * - Refund sets status='failed' AND refunded_at=NOW() in the same DB transaction as the balance credit
- * - If the server crashes mid-refund, the next run will retry only if refunded_at is still NULL
- * - Once refunded_at is set, the row is permanently excluded from recovery
+ * Double-spend prevention:
+ * - ALWAYS checks on-chain before refunding, even for synthetic hashes
+ * - For pending: hashes (broadcast but unconfirmed), waits 30 min before refunding
+ * - Refund is atomic: status='failed' + refunded_at + balance credit in one DB tx
+ * - Once refunded_at is set, permanently excluded from future runs
  */
 import pool from '../config/db.js';
 import { logger } from '../utils/logger.js';
 
-const STUCK_THRESHOLD_MINS = 10;
-const POLL_INTERVAL_MS     = 5 * 60 * 1000;
+const STUCK_THRESHOLD_MINS   = 10;
+const PENDING_REFUND_WAIT_MINS = 30; // wait longer before refunding broadcast-but-unconfirmed txs
+const POLL_INTERVAL_MS       = 5 * 60 * 1000;
 
 export function startWithdrawalRecoveryJob(): ReturnType<typeof setInterval> {
   recoverStuckWithdrawals();
@@ -25,9 +25,10 @@ export function startWithdrawalRecoveryJob(): ReturnType<typeof setInterval> {
 async function recoverStuckWithdrawals(): Promise<void> {
   try {
     const { rows } = await pool.query<{
-      id: string; user_id: string; amount: string; destination: string; ton_tx_hash: string | null;
+      id: string; user_id: string; amount: string; destination: string;
+      ton_tx_hash: string | null; updated_at: Date;
     }>(
-      `SELECT id, user_id, amount::text, destination, ton_tx_hash
+      `SELECT id, user_id, amount::text, destination, ton_tx_hash, updated_at
        FROM transactions
        WHERE type        = 'withdrawal'
          AND status      = 'processing'
@@ -47,10 +48,11 @@ async function recoverStuckWithdrawals(): Promise<void> {
 }
 
 async function recoverTransaction(tx: {
-  id: string; user_id: string; amount: string; destination: string; ton_tx_hash: string | null;
+  id: string; user_id: string; amount: string; destination: string;
+  ton_tx_hash: string | null; updated_at: Date;
 }): Promise<void> {
   try {
-    // If we have a real on-chain hash, mark as sent — no refund needed
+    // If we have a real on-chain hash (not synthetic), mark as confirmed — no refund needed
     if (tx.ton_tx_hash && !tx.ton_tx_hash.startsWith('pending:') && !tx.ton_tx_hash.startsWith('sent:')) {
       await pool.query(
         `UPDATE transactions SET status='confirmed', updated_at=NOW() WHERE id=$1 AND status='processing'`,
@@ -60,7 +62,7 @@ async function recoverTransaction(tx: {
       return;
     }
 
-    // Try to find the tx on-chain
+    // ALWAYS check on-chain before refunding — the transfer may have landed even without a hash.
     const hotWallet = process.env.HOT_WALLET_ADDRESS;
     if (hotWallet) {
       const onChainHash = await checkOnChain(hotWallet, tx.destination, tx.amount);
@@ -75,15 +77,23 @@ async function recoverTransaction(tx: {
       }
     }
 
-    // Cannot confirm on-chain — refund atomically
-    // Both the status update and balance credit happen in one transaction.
-    // refunded_at is set here — if this succeeds, the row is permanently excluded from future runs.
+    // On-chain check found nothing.
+    // For pending: hashes (broadcast but unconfirmed), wait longer before refunding
+    // to avoid refunding a tx that's just slow to confirm.
+    if (tx.ton_tx_hash?.startsWith('pending:')) {
+      const ageMinutes = (Date.now() - new Date(tx.updated_at).getTime()) / 60_000;
+      if (ageMinutes < PENDING_REFUND_WAIT_MINS) {
+        logger.info(`Withdrawal recovery: tx=${tx.id} was broadcast (pending hash), only ${ageMinutes.toFixed(1)}min old — waiting for confirmation`);
+        return;
+      }
+      logger.warn(`Withdrawal recovery: tx=${tx.id} broadcast ${ageMinutes.toFixed(1)}min ago with no on-chain confirmation — refunding`);
+    }
+
+    // Safe to refund — no hash, or pending hash older than 30 min with no on-chain match
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Use status='processing' AND refunded_at IS NULL as the guard —
-      // if another process already refunded this, rowCount will be 0 and we abort.
       const { rowCount } = await client.query(
         `UPDATE transactions
          SET status='failed', admin_note='Auto-refunded by recovery job',
@@ -93,13 +103,11 @@ async function recoverTransaction(tx: {
       );
 
       if (!rowCount) {
-        // Already handled by another process — safe to skip
         await client.query('ROLLBACK');
         logger.info(`Withdrawal recovery: tx=${tx.id} already handled, skipping`);
         return;
       }
 
-      // Credit balance in the same transaction
       await client.query(
         `UPDATE balances SET available = available + $1::numeric, updated_at=NOW()
          WHERE user_id = $2`,

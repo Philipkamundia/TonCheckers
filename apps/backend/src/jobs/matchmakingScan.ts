@@ -191,13 +191,22 @@ function startLobbyCountdown(
     clearInterval(tickInterval);
     activeLobbies.delete(gameId);
     try {
-      // Check neither player cancelled during countdown
       const cancelKey = `${COUNTDOWN_CANCEL_KEY}${gameId}`;
       const cancelled = await redis.get(cancelKey);
       await redis.del(cancelKey);
 
       if (cancelled) {
-        // Someone cancelled — handled in cancelLobby()
+        // Someone cancelled via cancelLobby() — already handled there
+        return;
+      }
+
+      // Also check DB status — the Redis cancel flag may have expired under load
+      // but cancelLobby() already set the game to 'cancelled' in the DB
+      const { rows: [game] } = await pool.query(
+        `SELECT status FROM games WHERE id=$1`, [gameId],
+      );
+      if (!game || game.status === 'cancelled') {
+        logger.info(`Lobby timeout: game=${gameId} already cancelled (Redis flag may have expired)`);
         return;
       }
 
@@ -256,8 +265,9 @@ export async function cancelLobby(
     activeLobbies.delete(gameId);
   }
 
-  // Set cancel flag in Redis (checked when countdown fires)
-  await redis.set(`${COUNTDOWN_CANCEL_KEY}${gameId}`, cancellingUserId, 'PX', 15_000);
+  // Set cancel flag in Redis with generous TTL — must outlive the countdown timeout
+  // even under server load. 60s is well beyond the 10s countdown window.
+  await redis.set(`${COUNTDOWN_CANCEL_KEY}${gameId}`, cancellingUserId, 'PX', 60_000);
 
   // Cancel game record
   await pool.query(

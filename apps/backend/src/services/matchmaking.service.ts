@@ -62,10 +62,23 @@ export class MatchmakingService {
         [userId, user.elo, stake],
       );
     } catch (err) {
-      // Redis/DB failed after lock — refund immediately
-      await BalanceService.unlockBalance(userId, stake).catch(e =>
-        logger.error(`Queue join refund failed user=${userId}: ${(e as Error).message}`),
-      );
+      // Redis/DB failed after lock — attempt refund with retries
+      let refunded = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await BalanceService.unlockBalance(userId, stake);
+          refunded = true;
+          break;
+        } catch (refundErr) {
+          logger.error(`Queue join refund attempt ${attempt}/3 failed user=${userId}: ${(refundErr as Error).message}`);
+          if (attempt < 3) await new Promise(r => setTimeout(r, attempt * 500));
+        }
+      }
+      if (!refunded) {
+        // All refund attempts failed — log as CRITICAL so it can be manually resolved
+        // The orphaned lock recovery job will catch this within 15 minutes
+        logger.error(`CRITICAL: queue join refund failed after 3 attempts user=${userId} stake=${stake} — orphaned lock will be recovered by job`);
+      }
       throw err;
     }
 

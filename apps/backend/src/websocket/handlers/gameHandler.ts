@@ -32,21 +32,25 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
         return socket.emit('error', { message: 'Not a participant' });
       }
 
-      // Populate or update the in-memory room so disconnect handler can find it
-      const existingRoom = GameRoomManager.get(gameId);
-      if (!existingRoom && game.player2Id) {
-        GameRoomManager.create({
-          gameId,
-          player1Id:       game.player1Id,
-          player2Id:       game.player2Id,
-          player1SocketId: game.player1Id === userId ? socket.id : null,
-          player2SocketId: game.player2Id === userId ? socket.id : null,
-          stake:           game.stake,
-        });
-      } else {
-        GameRoomManager.updateSocket(gameId, userId, socket.id);
+      // Only join the live room for active/waiting games.
+      // Completed/cancelled games send state once but don't join the room —
+      // avoids memory leaks and stale event delivery.
+      if (game.status === 'active' || game.status === 'waiting') {
+        const existingRoom = GameRoomManager.get(gameId);
+        if (!existingRoom && game.player2Id) {
+          GameRoomManager.create({
+            gameId,
+            player1Id:       game.player1Id,
+            player2Id:       game.player2Id,
+            player1SocketId: game.player1Id === userId ? socket.id : null,
+            player2SocketId: game.player2Id === userId ? socket.id : null,
+            stake:           game.stake,
+          });
+        } else {
+          GameRoomManager.updateSocket(gameId, userId, socket.id);
+        }
+        socket.join(`game:${gameId}`);
       }
-      socket.join(`game:${gameId}`);
 
       const remainingMs = await GameTimerService.getRemainingMs(gameId);
       socket.emit('game.state', {
@@ -131,7 +135,7 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
         const result   = await SettlementService.settleWin(
           gameId, winnerId, loserId, condition.reason, game.stake, io,
         );
-        // PRD §13 full breakdown in game.end
+        if (result.alreadySettled) { GameRoomManager.remove(gameId); return; }
         io.to(`game:${gameId}`).emit('game.end', {
           gameId,
           result:       'win',
@@ -181,6 +185,7 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
       const result = await SettlementService.settleWin(
         gameId, winnerId, userId, 'resign', game.stake, io,
       );
+      if (result.alreadySettled) return;
 
       io.to(`game:${gameId}`).emit('game.end', {
         gameId,
@@ -226,6 +231,7 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
       const result = await SettlementService.settleWin(
         room.gameId, winnerId, userId, 'disconnect', room.stake, io,
       );
+      if (result.alreadySettled) return;
 
       io.to(`game:${room.gameId}`).emit('game.end', {
         gameId:       room.gameId,

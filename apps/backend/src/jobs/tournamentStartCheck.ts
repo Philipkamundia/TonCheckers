@@ -2,6 +2,7 @@
  * tournamentStartCheck.ts — 30s job (PRD §9)
  * Auto-starts tournaments at start time regardless of fill status.
  * Sends "starting soon" Telegram notifications 30 minutes before.
+ * Recovers tournaments where checkRoundComplete was interrupted after COMMIT.
  */
 import { Server } from 'socket.io';
 import pool from '../config/db.js';
@@ -14,6 +15,7 @@ export function startTournamentStartCheck(io: Server): ReturnType<typeof setInte
   return setInterval(async () => {
     try {
       await checkDue(io);
+      await checkStuckRounds(io);
       await notifyUpcoming(io);
     } catch (err) {
       logger.error(`Tournament check error: ${(err as Error).message}`);
@@ -30,6 +32,46 @@ async function checkDue(io: Server): Promise<void> {
       await TournamentService.startTournament(id, io);
     } catch (err) {
       logger.error(`Start failed: ${id}: ${(err as Error).message}`);
+    }
+  }
+}
+
+/**
+ * Recover tournaments where the server crashed after COMMIT in recordMatchResult
+ * but before checkRoundComplete generated the next round.
+ *
+ * Detection: in_progress tournament where current_round has no pending non-bye matches
+ * AND no matches exist for current_round + 1 (next round not generated yet).
+ * Wait at least 2 minutes before recovering to avoid racing with an in-flight checkRoundComplete.
+ */
+async function checkStuckRounds(io: Server): Promise<void> {
+  const { rows } = await pool.query(
+    `SELECT t.id, t.current_round AS "currentRound"
+     FROM tournaments t
+     WHERE t.status = 'in_progress'
+       AND t.updated_at < NOW() - INTERVAL '2 minutes'
+       AND NOT EXISTS (
+         -- No pending non-bye matches in current round
+         SELECT 1 FROM tournament_matches m
+         WHERE m.tournament_id = t.id
+           AND m.round = t.current_round
+           AND m.is_bye = false
+           AND m.winner_id IS NULL
+       )
+       AND NOT EXISTS (
+         -- Next round hasn't been generated yet
+         SELECT 1 FROM tournament_matches m
+         WHERE m.tournament_id = t.id
+           AND m.round = t.current_round + 1
+       )`,
+  );
+
+  for (const { id, currentRound } of rows) {
+    try {
+      logger.warn(`Tournament recovery: stuck at round ${currentRound} for tournament=${id} — re-running checkRoundComplete`);
+      await TournamentService.recoverStuckRound(id, currentRound, io);
+    } catch (err) {
+      logger.error(`Tournament round recovery failed: ${id}: ${(err as Error).message}`);
     }
   }
 }

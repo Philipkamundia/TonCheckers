@@ -12,14 +12,16 @@ import { balanceApi } from '../services/api';
 
 export function Withdraw() {
   const { showBackButton, showMainButton, setMainButtonLoading, hideMainButton, haptic } = useTelegram();
-  const { balance, setBalance } = useStore();
+  const { balance, setBalance, user } = useStore();
   const wallet = useTonWallet();
   const navigate = useNavigate();
 
   const [amount,    setAmount]    = useState('');
   const [result,    setResult]    = useState<{ success: boolean; message: string } | null>(null);
-  const [countdown, setCountdown] = useState(0); // seconds remaining on cooldown
-  const walletAddress             = wallet?.account?.address ?? null;
+  const [countdown, setCountdown] = useState(0);
+  // Use the registered wallet address from the user profile, not the currently connected wallet
+  // This prevents Wallet B from redirecting funds when logged into a Wallet A account
+  const walletAddress             = user?.walletAddress ?? wallet?.account?.address ?? null;
   const available                 = parseFloat(balance?.available ?? '0');
   const MIN_WITHDRAW              = 0.1;
 

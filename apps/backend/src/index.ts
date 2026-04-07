@@ -21,6 +21,7 @@ import { startTreasuryMonitor } from './jobs/treasuryMonitor.js';
 import { startTournamentStartCheck } from './jobs/tournamentStartCheck.js';
 import { startLeaderboardRebuild } from './jobs/leaderboardRebuild.js';
 import { startWithdrawalRecoveryJob } from './jobs/withdrawalRecovery.js';
+import { startOrphanedLockRecoveryJob } from './jobs/orphanedLockRecovery.js';
 import { logger } from './utils/logger.js';
 import { runMigrations } from './migrate.js';
 
@@ -86,7 +87,7 @@ httpServer.listen(PORT, async () => {
   // Run DB migrations on every startup — idempotent, safe to run repeatedly
   await runMigrations();
 
-  const recovered = await GameService.recoverCrashedGames();
+  const recovered = await GameService.recoverCrashedGames(io);
   if (recovered.length) logger.warn(`Recovered ${recovered.length} crashed games`);
 
   new WebSocketService(io);
@@ -96,6 +97,7 @@ httpServer.listen(PORT, async () => {
   startTournamentStartCheck(io);
   startLeaderboardRebuild();
   startWithdrawalRecoveryJob();
+  startOrphanedLockRecoveryJob();
 
   try {
     await DepositDetectionService.start();
@@ -113,6 +115,7 @@ httpServer.listen(PORT, async () => {
   logger.info(`  💰 Deposit poller`);
   logger.info(`  🏦 Treasury monitor`);
   logger.info(`  🔄 Withdrawal recovery`);
+  logger.info(`  🔓 Orphaned lock recovery`);
 });
 
 const shutdown = () => {

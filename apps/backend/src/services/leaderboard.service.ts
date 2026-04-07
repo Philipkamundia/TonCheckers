@@ -13,11 +13,11 @@ export type LeaderboardSort = 'elo' | 'ton_won' | 'win_rate' | 'games_played';
 
 export interface LeaderboardEntry {
   rank:        number;
-  userId:      string;
+  userId?:     string;  // only included in /me response, stripped from public list
   username:    string;
   elo:         number;
   totalWon:    string;
-  winRate:     number;  // 0–100
+  winRate:     number;
   gamesPlayed: number;
   gamesWon:    number;
 }
@@ -98,7 +98,12 @@ export class LeaderboardService {
     const start      = (page - 1) * PAGE_SIZE;
     const paginated  = entries.slice(start, start + PAGE_SIZE);
 
-    return { entries: paginated, total, page, totalPages };
+    return {
+      entries: paginated.map(({ userId: _uid, ...rest }) => rest),
+      total,
+      page,
+      totalPages,
+    };
   }
 
   /** GET /leaderboard/me — caller's rank across all 4 categories */

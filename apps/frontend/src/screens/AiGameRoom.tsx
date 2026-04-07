@@ -56,7 +56,14 @@ export function AiGameRoom() {
         haptic[data.winner === 1 ? 'success' : 'warning']();
       }),
       on<{ board: Board }>('ai.state', (data) => { setBoard(data.board); setSelected(null); setTip(null); }),
-      on<{ remainingMs: number }>('game.tick', ({ remainingMs }) => setRemainingMs(remainingMs)),
+      on<{ remainingMs: number }>('game.tick', ({ remainingMs }) => {
+        setRemainingMs(remainingMs);
+        // Timer ran out — AI wins (same rule as PvP)
+        if (remainingMs === 0 && !aiThinking && !gameOver) {
+          setGameOver({ result: 'loss', winner: 2, reason: 'timeout' });
+          haptic.warning();
+        }
+      }),
       on<{ ok: boolean; from?: { row: number; col: number }; to?: { row: number; col: number }; reason?: string }>('ai.tip_result', (data) => {
         if (data.ok && data.from && data.to) setTip({ from: data.from, to: data.to });
         else setInvalid(data.reason ?? 'No tip available');

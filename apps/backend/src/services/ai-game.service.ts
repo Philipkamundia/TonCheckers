@@ -107,10 +107,22 @@ export class AiGameService {
       };
     }
 
-    // AI takes its turn
+    // AI takes its turn — add human-like thinking delay scaled by difficulty
     await GameTimerService.startTimer(gameId, 2);
 
     const difficulty = game.aiDifficulty as AiDifficulty;
+
+    // Thinking delay: beginner is quick but inconsistent, master takes longer
+    const thinkingDelay: Record<AiDifficulty, [number, number]> = {
+      beginner:     [800,  1800],  // 0.8–1.8s  (plays fast but makes mistakes)
+      intermediate: [1200, 2500],  // 1.2–2.5s  (considers options)
+      hard:         [2000, 4000],  // 2–4s      (thinks ahead)
+      master:       [3000, 6000],  // 3–6s      (deep calculation)
+    };
+    const [minMs, maxMs] = thinkingDelay[difficulty];
+    const delay = minMs + Math.random() * (maxMs - minMs);
+    await new Promise(r => setTimeout(r, delay));
+
     const aiMoveResult = getAiMove(state1.board, 2, difficulty);
 
     if (!aiMoveResult) {

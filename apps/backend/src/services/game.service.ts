@@ -3,6 +3,7 @@ import { type PoolClient } from 'pg';
 import { NotificationService } from './notification.service.js';
 import { logger } from '../utils/logger.js';
 import type { GameState } from '../engine/board.js';
+import type { Server } from 'socket.io';
 
 export interface GameRecord {
   id:               string;
@@ -69,7 +70,7 @@ export class GameService {
   }
 
   /** PRD §14 — crash recovery: refund all active and waiting games on server start */
-  static async recoverCrashedGames(): Promise<string[]> {
+  static async recoverCrashedGames(io?: Server): Promise<string[]> {
     const { rows } = await pool.query(
       `SELECT id, player1_id, player2_id, stake::text, status FROM games WHERE status IN ('active','waiting')`,
     );
@@ -81,7 +82,6 @@ export class GameService {
         await client.query('BEGIN');
 
         if (g.status === 'active') {
-          // Genuinely crashed mid-game — log it and notify players
           await client.query(
             `UPDATE games SET status='crashed', ended_at=NOW(), updated_at=NOW() WHERE id=$1`, [g.id],
           );
@@ -91,13 +91,12 @@ export class GameService {
             [g.id, g.player1_id, g.player2_id, g.stake],
           );
         } else {
-          // 'waiting' = lobby countdown — just cancel silently, no crash log, no notification
+          // 'waiting' = lobby countdown — cancel and notify players
           await client.query(
             `UPDATE games SET status='cancelled', updated_at=NOW() WHERE id=$1`, [g.id],
           );
         }
 
-        // Only refund if there was an actual stake locked
         const stakeNum = parseFloat(g.stake);
         if (stakeNum > 0) {
           const playerIds = [g.player1_id, g.player2_id].filter(Boolean);
@@ -120,13 +119,22 @@ export class GameService {
         await client.query('COMMIT');
         recovered.push(g.id);
 
-        // Only notify for actual crashes (active games), not cancelled lobbies
         if (g.status === 'active' && stakeNum > 0) {
           for (const uid of [g.player1_id, g.player2_id]) {
             if (uid) await NotificationService.send(uid, 'server_crash_refund', { amount: g.stake });
           }
           logger.warn(`Crash recovered: game=${g.id} stake=${g.stake}`);
         } else {
+          // Notify lobby players via WebSocket so they know to return to matchmaking
+          for (const uid of [g.player1_id, g.player2_id]) {
+            if (uid) {
+              io?.to(`user:${uid}`).emit('mm.cancelled', {
+                gameId: g.id,
+                cancelledBy: 'server_restart',
+                reason: 'Server restarted — stake returned',
+              });
+            }
+          }
           logger.info(`Lobby cancelled on restart: game=${g.id}`);
         }
       } catch (err) {

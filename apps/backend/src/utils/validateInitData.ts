@@ -65,11 +65,12 @@ export function validateInitData(initDataRaw: string): {
       return { valid: false, error: 'Hash mismatch — initData tampered' };
     }
 
-    // Check auth_date not older than 24 hours
+    // Check auth_date not older than 1 hour (configurable via INIT_DATA_MAX_AGE_SECS)
     const authDate = parseInt(dataMap.get('auth_date') ?? '0', 10);
     const age = Math.floor(Date.now() / 1000) - authDate;
-    if (age > 86_400) {
-      return { valid: false, error: 'initData expired (older than 24 hours)' };
+    const maxAge = parseInt(process.env.INIT_DATA_MAX_AGE_SECS ?? '3600', 10);
+    if (age > maxAge) {
+      return { valid: false, error: `initData expired (${age}s old, max ${maxAge}s)` };
     }
 
     const data = Object.fromEntries(dataMap);

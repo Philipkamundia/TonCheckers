@@ -1,5 +1,11 @@
 /**
  * WalletGate.tsx — Wallet connection screen
+ *
+ * Auth flow:
+ * - New wallet: requests tonProof on connect → POST /auth/connect (proof verified server-side)
+ * - Returning wallet: no proof needed → POST /auth/verify (JWT session)
+ * - If proof unavailable (wallet already connected before app opened): falls back to verify
+ *   which is safe for returning users since they proved ownership on first connect
  */
 import { useState, useEffect } from 'react';
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
@@ -17,14 +23,16 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
 
   // Auto-authenticate when wallet connects
   useEffect(() => {
-    if (!wallet) {
-      hideMainButton();
-      return;
-    }
+    if (!wallet) { hideMainButton(); return; }
     doAuth(wallet, initData);
   }, [wallet]);
 
   function openWalletModal() {
+    // Request tonProof to prove wallet ownership for new account creation
+    tonConnectUI.setConnectRequestParameters({
+      state: 'ready',
+      value: { tonProof: `checkers-${Date.now()}` },
+    });
     tonConnectUI.openModal();
   }
 
@@ -42,9 +50,19 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
     setError(null);
     try {
       const address = connectedWallet.account.address;
-      // Always use verify — initData is signed by Telegram and sufficient for auth.
-      // tonProof is unreliable across wallet types (Telegram Wallet W5 fails proof verification).
-      const res = await authApi.verify({ walletAddress: address, initData: currentInitData });
+      const proof   = connectedWallet.connectItems?.tonProof;
+
+      let res;
+      if (proof && 'proof' in proof) {
+        // tonProof available — use connect (verifies ownership, handles new + returning)
+        res = await authApi.connect({ walletAddress: address, proof: proof.proof, initData: currentInitData });
+      } else {
+        // No proof — wallet was already connected before app opened.
+        // Safe for returning users (already proved ownership on first connect).
+        // New users will be rejected by the server and prompted to reconnect.
+        res = await authApi.verify({ walletAddress: address, initData: currentInitData });
+      }
+
       setTokens(res.data.accessToken, res.data.refreshToken);
       setUser(res.data.user);
       haptic.success();
@@ -53,7 +71,12 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
     } catch (err: unknown) {
       const axiosErr = err as { response?: { data?: { error?: string }; status?: number } };
       const msg = axiosErr?.response?.data?.error;
-      setError(msg ?? 'Connection failed. Please try again.');
+      if (msg?.includes('proof') || msg?.includes('not registered')) {
+        // Proof failed or new user without proof — prompt reconnect to get fresh proof
+        setError('Please disconnect and reconnect your wallet to verify ownership.');
+      } else {
+        setError(msg ?? 'Connection failed. Please try again.');
+      }
       haptic.error();
     } finally {
       setLoading(false);
@@ -70,11 +93,7 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
         {!wallet ? (
           <>
             <p style={styles.cardText}>Connect your TON wallet to start playing</p>
-            <button
-              style={styles.connectBtn}
-              onClick={openWalletModal}
-              disabled={loading}
-            >
+            <button style={styles.connectBtn} onClick={openWalletModal} disabled={loading}>
               Connect Wallet
             </button>
           </>
