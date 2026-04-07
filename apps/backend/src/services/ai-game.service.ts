@@ -114,10 +114,10 @@ export class AiGameService {
 
     // Thinking delay: beginner is quick but inconsistent, master takes longer
     const thinkingDelay: Record<AiDifficulty, [number, number]> = {
-      beginner:     [1500, 3000],  // 1.5–3s
-      intermediate: [2500, 4500],  // 2.5–4.5s
-      hard:         [4000, 7000],  // 4–7s
-      master:       [6000, 10000], // 6–10s
+      beginner:     [800,  1500],  // 0.8–1.5s
+      intermediate: [1200, 2500],  // 1.2–2.5s
+      hard:         [2000, 4000],  // 2–4s
+      master:       [3500, 6000],  // 3.5–6s
     };
     const [minMs, maxMs] = thinkingDelay[difficulty];
     const delay = minMs + Math.random() * (maxMs - minMs);

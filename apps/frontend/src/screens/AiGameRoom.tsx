@@ -31,12 +31,11 @@ export function AiGameRoom() {
 
   // Client-side countdown — ticks every second when it's the human's turn
   useEffect(() => {
-    if (aiThinking || gameOver || !board) return;
+    if (aiThinking || gameOver) return;
     const interval = setInterval(() => {
       setRemainingMs(prev => {
         const next = Math.max(0, prev - 1000);
         if (next === 0) {
-          // Time's up — AI wins
           setGameOver({ result: 'loss', winner: 2, reason: 'timeout' });
           haptic.warning();
         }
@@ -44,7 +43,7 @@ export function AiGameRoom() {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [aiThinking, gameOver, board]);
+  }, [aiThinking, gameOver]);
 
   useEffect(() => { return showBackButton(() => navigate('/ai')); }, []);
 
@@ -132,16 +131,25 @@ export function AiGameRoom() {
       // Only send if it's a valid destination
       if (validDests.has(key)) {
         if (board) {
-          // Optimistically apply human move to board immediately
+          // Optimistically apply human move including captures
           const newBoard = board.map(r => [...r]) as typeof board;
           const piece = newBoard[selected.row][selected.col];
           newBoard[selected.row][selected.col] = 0;
           newBoard[row][col] = piece;
-          // Animate the piece sliding
+          // Remove captured pieces
+          const matchedMove = legalMoves.find(
+            m => m.from.row === selected.row && m.from.col === selected.col &&
+                 m.to.row === row && m.to.col === col
+          );
+          if (matchedMove) {
+            for (const cap of matchedMove.captures) {
+              newBoard[cap.row][cap.col] = 0;
+            }
+          }
           const pieceType = piece;
           setHumanPiece({ from: selected, to: { row, col }, pieceType });
           setTimeout(() => {
-            setBoard(newBoard);  // show moved piece at destination
+            setBoard(newBoard);
             setHumanPiece(null);
           }, 350);
         }
