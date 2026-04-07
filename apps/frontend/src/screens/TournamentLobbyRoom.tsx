@@ -57,7 +57,7 @@ export function TournamentLobbyRoom() {
         setStatus('forfeit_win');
         setTimeout(() => {
           setPendingTournamentLobby(null);
-          navigate(`/tournaments/${data.tournamentId}/round`, { replace: true });
+          navigate(`/tournaments/${data.tournamentId}`, { replace: true });
         }, 2_000);
       }),
 
@@ -67,7 +67,7 @@ export function TournamentLobbyRoom() {
         setStatus('forfeit_loss');
         setTimeout(() => {
           setPendingTournamentLobby(null);
-          navigate(`/tournaments/${data.tournamentId}/round`, { replace: true });
+          navigate(`/tournaments/${data.tournamentId}`, { replace: true });
         }, 2_000);
       }),
     ];

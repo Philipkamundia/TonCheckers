@@ -4,6 +4,7 @@ import { registerGameHandlers } from '../websocket/handlers/gameHandler.js';
 import { registerUserHandlers } from '../websocket/handlers/userHandler.js';
 import { registerAiGameHandlers } from '../websocket/handlers/aiGameHandler.js';
 import { registerTournamentLobbyHandlers } from '../websocket/handlers/tournamentLobbyHandler.js';
+import { registerTournamentBracketHandlers } from '../websocket/handlers/tournamentBracketHandler.js';
 import { logger } from '../utils/logger.js';
 
 // Per-socket rate limit: max events per window
@@ -86,6 +87,7 @@ export class WebSocketService {
       registerGameHandlers(this.io, socket);
       registerAiGameHandlers(this.io, socket);
       registerTournamentLobbyHandlers(this.io, socket);
+      registerTournamentBracketHandlers(socket);
       socket.on('disconnect', (reason) => {
         logger.debug(`WS disconnect: ${socket.id} reason=${reason}`);
         socket.rooms.forEach((room) => socket.leave(room));

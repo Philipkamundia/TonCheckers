@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { useStore } from './store';
@@ -14,7 +14,6 @@ import { TournamentList }         from './screens/TournamentList';
 import { TournamentDetail }       from './screens/TournamentDetail';
 import { TournamentCreate }       from './screens/TournamentCreate';
 import { TournamentLobbyRoom }    from './screens/TournamentLobbyRoom';
-import { TournamentPostRound }    from './screens/TournamentPostRound';
 import { Leaderboard }            from './screens/Leaderboard';
 import { Deposit }                from './screens/Deposit';
 import { Withdraw }               from './screens/Withdraw';
@@ -41,25 +40,74 @@ function AppRoutes() {
   const { on } = useWebSocket();
   const postAuthPath = '/';
 
-  // Keep a ref so the on() callback always reads the latest activeGameId
-  // without needing to re-subscribe every time it changes
   const activeGameIdRef = useRef(activeGameId);
   useEffect(() => { activeGameIdRef.current = activeGameId; }, [activeGameId]);
 
-  // Global tournament lobby_ready handler
-  // If player is NOT in an active game, route them directly to the lobby
+  // Pending tournament starting prompts (can be multiple concurrent tournaments)
+  const [tournamentPrompts, setTournamentPrompts] = useState<
+    Array<{ tournamentId: string; tournamentName: string; windowSeconds: number }>
+  >([]);
+
+  useEffect(() => {
+    return on<{ tournamentId: string; tournamentName: string; windowSeconds: number }>(
+      'tournament.starting', (data) => {
+        setTournamentPrompts(prev => {
+          if (prev.find(p => p.tournamentId === data.tournamentId)) return prev;
+          return [...prev, data];
+        });
+      },
+    );
+  }, [on]);
+
+  function acceptTournament(tournamentId: string) {
+    setTournamentPrompts(prev => prev.filter(p => p.tournamentId !== tournamentId));
+    navigate(`/tournaments/${tournamentId}`);
+  }
+
+  function declineTournament(tournamentId: string) {
+    setTournamentPrompts(prev => prev.filter(p => p.tournamentId !== tournamentId));
+  }
+
+  // Global tournament lobby_ready — route directly if not in a game
   useEffect(() => {
     return on<TournamentLobbyPayload>('tournament.lobby_ready', (data) => {
       if (!activeGameIdRef.current) {
         setPendingTournamentLobby(data);
         navigate(`/tournament-lobby/${data.gameId}`);
       }
-      // If in a game, GameRoom handles the prompt overlay
     });
   }, [on]);
 
   return (
-    <Routes>
+    <>
+      {/* Tournament starting prompts — stacked, one per tournament */}
+      {tournamentPrompts.map((p, i) => (
+        <div key={p.tournamentId} style={{
+          position: 'fixed', bottom: 80 + i * 130, left: 16, right: 16, zIndex: 1000,
+          background: 'var(--tg-theme-secondary-bg-color)',
+          borderRadius: 16, padding: '14px 16px',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          border: '1px solid #2AABEE',
+        }}>
+          <p style={{ color: 'var(--tg-theme-text-color)', fontWeight: 700, fontSize: 15, margin: '0 0 4px' }}>
+            🏆 {p.tournamentName}
+          </p>
+          <p style={{ color: 'var(--tg-theme-hint-color)', fontSize: 13, margin: '0 0 12px' }}>
+            Tournament is starting — join the bracket ({p.windowSeconds}s window)
+          </p>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => acceptTournament(p.tournamentId)} style={{
+              flex: 1, background: '#2AABEE', border: 'none', borderRadius: 10,
+              padding: '10px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+            }}>Join Bracket</button>
+            <button onClick={() => declineTournament(p.tournamentId)} style={{
+              flex: 1, background: 'var(--tg-theme-bg-color)', border: 'none', borderRadius: 10,
+              padding: '10px', color: 'var(--tg-theme-hint-color)', fontSize: 14, cursor: 'pointer',
+            }}>Decline</button>
+          </div>
+        </div>
+      ))}
+      <Routes>
       {/* Public — wallet gate */}
       <Route path="/connect" element={
         accessToken && user
@@ -80,7 +128,6 @@ function AppRoutes() {
       <Route path="/tournaments"                    element={<ProtectedRoute><TournamentList /></ProtectedRoute>} />
       <Route path="/tournaments/create"             element={<ProtectedRoute><TournamentCreate /></ProtectedRoute>} />
       <Route path="/tournaments/:id"                element={<ProtectedRoute><TournamentDetail /></ProtectedRoute>} />
-      <Route path="/tournaments/:id/round"          element={<ProtectedRoute><TournamentPostRound /></ProtectedRoute>} />
       <Route path="/tournament-lobby/:gameId"       element={<ProtectedRoute><TournamentLobbyRoom /></ProtectedRoute>} />
 
       <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
@@ -96,6 +143,7 @@ function AppRoutes() {
           : <Navigate to="/connect" replace />
       } />
     </Routes>
+    </>
   );
 }
 

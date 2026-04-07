@@ -49,6 +49,7 @@ async function checkStuckRounds(io: Server): Promise<void> {
     `SELECT t.id, t.current_round AS "currentRound"
      FROM tournaments t
      WHERE t.status = 'in_progress'
+       AND t.current_round > 0
        AND t.updated_at < NOW() - INTERVAL '2 minutes'
        AND NOT EXISTS (
          -- No pending non-bye matches in current round

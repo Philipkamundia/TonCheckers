@@ -20,6 +20,7 @@ import { startMatchmakingScan } from './jobs/matchmakingScan.js';
 import { startTreasuryMonitor } from './jobs/treasuryMonitor.js';
 import { startTournamentStartCheck } from './jobs/tournamentStartCheck.js';
 import { startTournamentLobbyCheck } from './jobs/tournamentLobbyCheck.js';
+import { startTournamentBracketCheck } from './jobs/tournamentBracketCheck.js';
 import { startLeaderboardRebuild } from './jobs/leaderboardRebuild.js';
 import { startWithdrawalRecoveryJob } from './jobs/withdrawalRecovery.js';
 import { startOrphanedLockRecoveryJob } from './jobs/orphanedLockRecovery.js';
@@ -97,6 +98,7 @@ httpServer.listen(PORT, async () => {
   startMatchmakingScan(io);
   startTournamentStartCheck(io);
   startTournamentLobbyCheck(io);
+  startTournamentBracketCheck(io);
   startLeaderboardRebuild();
   startWithdrawalRecoveryJob();
   startOrphanedLockRecoveryJob();

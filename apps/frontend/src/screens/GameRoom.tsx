@@ -74,11 +74,11 @@ export function GameRoom() {
     });
   }, [resign]);
 
-  // Route to tournament post-round after game ends in a tournament
+  // Route to tournament bracket after game ends in a tournament
   useEffect(() => {
     if ((gameState.status === 'completed' || gameState.status === 'crashed') && activeTournamentId) {
-      setActiveTournamentId(null); // clear so next PvP game isn't affected
-      navigate(`/tournaments/${activeTournamentId}/round`, { replace: true });
+      setActiveTournamentId(null);
+      navigate(`/tournaments/${activeTournamentId}`, { replace: true });
     }
   }, [gameState.status, activeTournamentId]);
 

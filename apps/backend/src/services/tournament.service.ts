@@ -10,6 +10,7 @@ import { NotificationService } from './notification.service.js';
 import { GameService } from './game.service.js';
 import { GameTimerService } from './game-timer.service.js';
 import { TournamentLobbyService } from './tournament-lobby.service.js';
+import { TournamentBracketService } from './tournament-bracket.service.js';
 import { initialGameState } from '../engine/board.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { logger } from '../utils/logger.js';
@@ -196,6 +197,8 @@ export class TournamentService {
   }
 
   // ─── Start (called by the 30s job) ───────────────────────────────────────
+  // Phase 1: notify participants, open 30s bracket presence window.
+  // Phase 2: resolveBracketWindow() called by tournamentBracketCheck job.
 
   static async startTournament(tournamentId: string, io: Server): Promise<void> {
     const { rows: [t] } = await pool.query(
@@ -213,136 +216,141 @@ export class TournamentService {
       [tournamentId],
     );
 
-    // PRD §9: 0 or 1 participants → cancel, refund all
     if (participants.length <= 1) {
       await TournamentService.cancelTournament(tournamentId, 'Insufficient participants', io);
       return;
     }
 
-    // Generate bracket
-    const { matches, byePlayers } = BracketService.generateRound1(
-      participants.map(p => ({ userId: p.userId, seedElo: p.seedElo })),
-      t.bracketSize,
+    // Mark tournament as in_progress so it won't be re-triggered
+    await pool.query(
+      `UPDATE tournaments SET status='in_progress', started_at=NOW(), updated_at=NOW() WHERE id=$1`,
+      [tournamentId],
     );
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+    // Open 30s bracket presence window
+    await TournamentBracketService.openWindow(tournamentId, participants);
 
-      // Update tournament status
-      await client.query(
-        `UPDATE tournaments SET status='in_progress', current_round=1,
-           started_at=NOW(), updated_at=NOW() WHERE id=$1`,
-        [tournamentId],
-      );
-
-      // Mark bye players
-      for (const userId of byePlayers) {
-        await client.query(
-          `UPDATE tournament_participants SET received_bye=true, current_round=2
-           WHERE tournament_id=$1 AND user_id=$2`,
-          [tournamentId, userId],
-        );
-      }
-
-      // Insert match records and create games for non-bye matches
-      for (const m of matches) {
-        if (m.isBye) {
-          await client.query(
-            `INSERT INTO tournament_matches (tournament_id, round, match_number, player1_id, is_bye, winner_id)
-             VALUES ($1,$2,$3,$4,true,$4)`,
-            [tournamentId, m.round, m.matchNumber, m.player1Id],
-          );
-          continue;
-        }
-
-        // Create game in 'waiting' status — activates once both players join lobby
-        const { rows: [p1] } = await client.query('SELECT elo FROM users WHERE id=$1', [m.player1Id]);
-        const { rows: [p2] } = await client.query('SELECT elo FROM users WHERE id=$1', [m.player2Id]);
-
-        const game = await GameService.createGame(
-          m.player1Id!, m.player2Id!, '0',
-          p1?.elo ?? 1200, p2?.elo ?? 1200,
-          initialGameState(),
-          client,
-          'waiting',
-        );
-
-        await client.query(
-          `INSERT INTO tournament_matches
-             (tournament_id, game_id, round, match_number, player1_id, player2_id)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
-          [tournamentId, game.id, m.round, m.matchNumber, m.player1Id, m.player2Id],
-        );
-
-        // Store match row id for lobby creation (after commit)
-        (m as any)._gameId   = game.id;
-        (m as any)._matchId  = null; // resolved after commit below
-        (m as any)._p1Uname  = p1;
-        (m as any)._p2Uname  = p2;
-      }
-
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      logger.error(`Tournament start failed: ${tournamentId}: ${(err as Error).message}`);
-      throw err;
-    } finally {
-      client.release();
+    // Notify all participants — they must accept and head to the bracket screen
+    for (const p of participants) {
+      io.to(`user:${p.userId}`).emit('tournament.starting', {
+        tournamentId,
+        tournamentName: t.name,
+        windowSeconds:  30,
+      });
     }
 
-    // After commit — create lobbies and notify players per match
+    logger.info(`Tournament starting: ${tournamentId} — bracket window open, ${participants.length} notified`);
+  }
+
+  // ─── Phase 2: resolve bracket window after 30s ────────────────────────────
+  // Called by tournamentBracketCheck job.
+  // presentUserIds = players who emitted tournament.bracket_join within 30s.
+
+  static async resolveBracketWindow(
+    tournamentId: string,
+    presentUserIds: string[],
+    allParticipants: Array<{ userId: string; seedElo: number }>,
+    io: Server,
+  ): Promise<void> {
+    const { rows: [t] } = await pool.query(
+      `SELECT id, name, status, bracket_size AS "bracketSize"
+       FROM tournaments WHERE id=$1`,
+      [tournamentId],
+    );
+    if (!t || t.status !== 'in_progress') return;
+
+    // Absent players → eliminate (forfeit)
+    const absentIds = allParticipants
+      .map(p => p.userId)
+      .filter(id => !presentUserIds.includes(id));
+
+    for (const userId of absentIds) {
+      await pool.query(
+        `UPDATE tournament_participants SET is_eliminated=true WHERE tournament_id=$1 AND user_id=$2`,
+        [tournamentId, userId],
+      );
+      io.to(`user:${userId}`).emit('tournament.bracket_forfeit', {
+        tournamentId, reason: 'Did not join bracket in time',
+      });
+    }
+
+    // Need at least 2 present to run a tournament
+    if (presentUserIds.length <= 1) {
+      await TournamentService.cancelTournament(tournamentId, 'Not enough players joined bracket', io);
+      return;
+    }
+
+    const presentPlayers = allParticipants.filter(p => presentUserIds.includes(p.userId));
+
+    // Generate bracket from present players only
+    const { matches, byePlayers } = BracketService.generateRound1(presentPlayers, t.bracketSize);
+
+    await pool.query(
+      `UPDATE tournaments SET current_round=1, updated_at=NOW() WHERE id=$1`,
+      [tournamentId],
+    );
+
+    // Mark bye players
+    for (const userId of byePlayers) {
+      await pool.query(
+        `UPDATE tournament_participants SET received_bye=true, current_round=2
+         WHERE tournament_id=$1 AND user_id=$2`,
+        [tournamentId, userId],
+      );
+    }
+
+    // Build user info cache
     const userCache = new Map<string, { username: string; elo: number }>();
-    for (const p of participants) {
+    for (const p of presentPlayers) {
       const { rows: [u] } = await pool.query('SELECT username, elo FROM users WHERE id=$1', [p.userId]);
       if (u) userCache.set(p.userId, u);
     }
 
+    // Create games + lobbies for each match
     for (const m of matches) {
       if (m.isBye) {
-        // Bye player advances — notify them
-        const byeUser = userCache.get(m.player1Id!);
-        await NotificationService.send(m.player1Id!, 'tournament_match_ready', {
-          tournamentName: t.name, round: 1,
-        });
-        io.to(`user:${m.player1Id}`).emit('tournament.bye_advance', {
-          tournamentId, round: 1, username: byeUser?.username,
-        });
+        await pool.query(
+          `INSERT INTO tournament_matches (tournament_id, round, match_number, player1_id, is_bye, winner_id)
+           VALUES ($1,$2,$3,$4,true,$4)`,
+          [tournamentId, m.round, m.matchNumber, m.player1Id],
+        );
+        io.to(`user:${m.player1Id}`).emit('tournament.bye_advance', { tournamentId, round: 1 });
         continue;
       }
-
-      const gameId  = (m as any)._gameId as string;
-      const { rows: [matchRow] } = await pool.query(
-        `SELECT id FROM tournament_matches WHERE tournament_id=$1 AND game_id=$2`,
-        [tournamentId, gameId],
-      );
-
-      await TournamentLobbyService.createLobby(
-        gameId, tournamentId, matchRow.id, m.player1Id!, m.player2Id!,
-      );
 
       const p1Info = userCache.get(m.player1Id!) ?? { username: 'Opponent', elo: 1200 };
       const p2Info = userCache.get(m.player2Id!) ?? { username: 'Opponent', elo: 1200 };
 
-      // Notify each player with their opponent's info
-      await NotificationService.send(m.player1Id!, 'tournament_match_ready', { tournamentName: t.name, round: 1 });
-      io.to(`user:${m.player1Id}`).emit('tournament.lobby_ready', {
-        tournamentId, gameId, round: 1,
-        opponentId:       m.player2Id,
-        opponentUsername: p2Info.username,
-        opponentElo:      p2Info.elo,
-      });
+      const game = await GameService.createGame(
+        m.player1Id!, m.player2Id!, '0',
+        p1Info.elo, p2Info.elo,
+        initialGameState(),
+        undefined,
+        'waiting',
+      );
 
-      await NotificationService.send(m.player2Id!, 'tournament_match_ready', { tournamentName: t.name, round: 1 });
+      const { rows: [matchRow] } = await pool.query(
+        `INSERT INTO tournament_matches
+           (tournament_id, game_id, round, match_number, player1_id, player2_id)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [tournamentId, game.id, 1, m.matchNumber, m.player1Id, m.player2Id],
+      );
+
+      await TournamentLobbyService.createLobby(
+        game.id, tournamentId, matchRow.id, m.player1Id!, m.player2Id!,
+      );
+
+      io.to(`user:${m.player1Id}`).emit('tournament.lobby_ready', {
+        tournamentId, gameId: game.id, round: 1,
+        opponentId: m.player2Id, opponentUsername: p2Info.username, opponentElo: p2Info.elo,
+      });
       io.to(`user:${m.player2Id}`).emit('tournament.lobby_ready', {
-        tournamentId, gameId, round: 1,
-        opponentId:       m.player1Id,
-        opponentUsername: p1Info.username,
-        opponentElo:      p1Info.elo,
+        tournamentId, gameId: game.id, round: 1,
+        opponentId: m.player1Id, opponentUsername: p1Info.username, opponentElo: p1Info.elo,
       });
     }
 
-    logger.info(`Tournament started: ${tournamentId} players=${participants.length} byes=${byePlayers.length}`);
+    logger.info(`Bracket resolved: ${tournamentId} present=${presentUserIds.length} absent=${absentIds.length} byes=${byePlayers.length}`);
   }
 
   // ─── Advance round after a match completes ────────────────────────────────
