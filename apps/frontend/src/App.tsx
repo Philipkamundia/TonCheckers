@@ -1,23 +1,27 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { useStore } from './store';
-import { WalletGate }        from './screens/WalletGate';
-import { Home }              from './screens/Home';
-import { applyTheme }        from './screens/Profile';
-import { PvpLobby }          from './screens/PvpLobby';
-import { LobbyRoom }         from './screens/LobbyRoom';
-import { GameRoom }          from './screens/GameRoom';
-import { AiSelect }          from './screens/AiSelect';
-import { AiGameRoom }        from './screens/AiGameRoom';
-import { TournamentList }    from './screens/TournamentList';
-import { TournamentDetail }  from './screens/TournamentDetail';
-import { TournamentCreate }  from './screens/TournamentCreate';
-import { Leaderboard }       from './screens/Leaderboard';
-import { Deposit }           from './screens/Deposit';
-import { Withdraw }          from './screens/Withdraw';
-import { Profile }           from './screens/Profile';
-import { AdminDashboard }    from './screens/AdminDashboard';
+import { WalletGate }             from './screens/WalletGate';
+import { Home }                   from './screens/Home';
+import { applyTheme }             from './screens/Profile';
+import { PvpLobby }               from './screens/PvpLobby';
+import { LobbyRoom }              from './screens/LobbyRoom';
+import { GameRoom }               from './screens/GameRoom';
+import { AiSelect }               from './screens/AiSelect';
+import { AiGameRoom }             from './screens/AiGameRoom';
+import { TournamentList }         from './screens/TournamentList';
+import { TournamentDetail }       from './screens/TournamentDetail';
+import { TournamentCreate }       from './screens/TournamentCreate';
+import { TournamentLobbyRoom }    from './screens/TournamentLobbyRoom';
+import { TournamentPostRound }    from './screens/TournamentPostRound';
+import { Leaderboard }            from './screens/Leaderboard';
+import { Deposit }                from './screens/Deposit';
+import { Withdraw }               from './screens/Withdraw';
+import { Profile }                from './screens/Profile';
+import { AdminDashboard }         from './screens/AdminDashboard';
+import { useWebSocket }           from './hooks/useWebSocket';
+import type { TournamentLobbyPayload } from './store';
 
 const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://toncheckers.pages.dev'}/tonconnect-manifest.json`;
 
@@ -32,9 +36,27 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppRoutes() {
-  const { accessToken, user } = useStore();
+  const { accessToken, user, activeGameId, setPendingTournamentLobby } = useStore();
   const navigate = useNavigate();
+  const { on } = useWebSocket();
   const postAuthPath = '/';
+
+  // Keep a ref so the on() callback always reads the latest activeGameId
+  // without needing to re-subscribe every time it changes
+  const activeGameIdRef = useRef(activeGameId);
+  useEffect(() => { activeGameIdRef.current = activeGameId; }, [activeGameId]);
+
+  // Global tournament lobby_ready handler
+  // If player is NOT in an active game, route them directly to the lobby
+  useEffect(() => {
+    return on<TournamentLobbyPayload>('tournament.lobby_ready', (data) => {
+      if (!activeGameIdRef.current) {
+        setPendingTournamentLobby(data);
+        navigate(`/tournament-lobby/${data.gameId}`);
+      }
+      // If in a game, GameRoom handles the prompt overlay
+    });
+  }, [on]);
 
   return (
     <Routes>
@@ -55,9 +77,11 @@ function AppRoutes() {
       <Route path="/ai"              element={<ProtectedRoute><AiSelect /></ProtectedRoute>} />
       <Route path="/ai-game/:gameId" element={<ProtectedRoute><AiGameRoom /></ProtectedRoute>} />
 
-      <Route path="/tournaments"        element={<ProtectedRoute><TournamentList /></ProtectedRoute>} />
-      <Route path="/tournaments/create" element={<ProtectedRoute><TournamentCreate /></ProtectedRoute>} />
-      <Route path="/tournaments/:id"    element={<ProtectedRoute><TournamentDetail /></ProtectedRoute>} />
+      <Route path="/tournaments"                    element={<ProtectedRoute><TournamentList /></ProtectedRoute>} />
+      <Route path="/tournaments/create"             element={<ProtectedRoute><TournamentCreate /></ProtectedRoute>} />
+      <Route path="/tournaments/:id"                element={<ProtectedRoute><TournamentDetail /></ProtectedRoute>} />
+      <Route path="/tournaments/:id/round"          element={<ProtectedRoute><TournamentPostRound /></ProtectedRoute>} />
+      <Route path="/tournament-lobby/:gameId"       element={<ProtectedRoute><TournamentLobbyRoom /></ProtectedRoute>} />
 
       <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
       <Route path="/deposit"     element={<ProtectedRoute><Deposit /></ProtectedRoute>} />

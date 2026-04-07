@@ -9,6 +9,7 @@ import { BracketService } from './bracket.service.js';
 import { NotificationService } from './notification.service.js';
 import { GameService } from './game.service.js';
 import { GameTimerService } from './game-timer.service.js';
+import { TournamentLobbyService } from './tournament-lobby.service.js';
 import { initialGameState } from '../engine/board.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { logger } from '../utils/logger.js';
@@ -165,6 +166,7 @@ export class TournamentService {
               t.started_at        AS "startedAt",
               t.completed_at      AS "completedAt",
               t.winner_id         AS "winnerId",
+              t.winner_payout::text AS "winnerPayout",
               t.creator_id        AS "creatorId",
               t.created_at        AS "createdAt",
               u.username          AS "creatorUsername"
@@ -254,15 +256,16 @@ export class TournamentService {
           continue;
         }
 
-        // Create the actual game — pass client so it's part of the transaction
+        // Create game in 'waiting' status — activates once both players join lobby
         const { rows: [p1] } = await client.query('SELECT elo FROM users WHERE id=$1', [m.player1Id]);
         const { rows: [p2] } = await client.query('SELECT elo FROM users WHERE id=$1', [m.player2Id]);
 
         const game = await GameService.createGame(
-          m.player1Id!, m.player2Id!, '0', // no stake in tournament
+          m.player1Id!, m.player2Id!, '0',
           p1?.elo ?? 1200, p2?.elo ?? 1200,
           initialGameState(),
           client,
+          'waiting',
         );
 
         await client.query(
@@ -272,8 +275,11 @@ export class TournamentService {
           [tournamentId, game.id, m.round, m.matchNumber, m.player1Id, m.player2Id],
         );
 
-        // Start 30s move timer for tournament games
-        await GameTimerService.startTimer(game.id, 1);
+        // Store match row id for lobby creation (after commit)
+        (m as any)._gameId   = game.id;
+        (m as any)._matchId  = null; // resolved after commit below
+        (m as any)._p1Uname  = p1;
+        (m as any)._p2Uname  = p2;
       }
 
       await client.query('COMMIT');
@@ -285,15 +291,54 @@ export class TournamentService {
       client.release();
     }
 
-    // Notify all participants
+    // After commit — create lobbies and notify players per match
+    const userCache = new Map<string, { username: string; elo: number }>();
     for (const p of participants) {
-      await NotificationService.send(p.userId, 'tournament_match_ready', {
-        tournamentName: t.name,
-        round: 1,
+      const { rows: [u] } = await pool.query('SELECT username, elo FROM users WHERE id=$1', [p.userId]);
+      if (u) userCache.set(p.userId, u);
+    }
+
+    for (const m of matches) {
+      if (m.isBye) {
+        // Bye player advances — notify them
+        const byeUser = userCache.get(m.player1Id!);
+        await NotificationService.send(m.player1Id!, 'tournament_match_ready', {
+          tournamentName: t.name, round: 1,
+        });
+        io.to(`user:${m.player1Id}`).emit('tournament.bye_advance', {
+          tournamentId, round: 1, username: byeUser?.username,
+        });
+        continue;
+      }
+
+      const gameId  = (m as any)._gameId as string;
+      const { rows: [matchRow] } = await pool.query(
+        `SELECT id FROM tournament_matches WHERE tournament_id=$1 AND game_id=$2`,
+        [tournamentId, gameId],
+      );
+
+      await TournamentLobbyService.createLobby(
+        gameId, tournamentId, matchRow.id, m.player1Id!, m.player2Id!,
+      );
+
+      const p1Info = userCache.get(m.player1Id!) ?? { username: 'Opponent', elo: 1200 };
+      const p2Info = userCache.get(m.player2Id!) ?? { username: 'Opponent', elo: 1200 };
+
+      // Notify each player with their opponent's info
+      await NotificationService.send(m.player1Id!, 'tournament_match_ready', { tournamentName: t.name, round: 1 });
+      io.to(`user:${m.player1Id}`).emit('tournament.lobby_ready', {
+        tournamentId, gameId, round: 1,
+        opponentId:       m.player2Id,
+        opponentUsername: p2Info.username,
+        opponentElo:      p2Info.elo,
       });
-      io.to(`user:${p.userId}`).emit('tournament.match_ready', {
-        tournamentId,
-        round: 1,
+
+      await NotificationService.send(m.player2Id!, 'tournament_match_ready', { tournamentName: t.name, round: 1 });
+      io.to(`user:${m.player2Id}`).emit('tournament.lobby_ready', {
+        tournamentId, gameId, round: 1,
+        opponentId:       m.player1Id,
+        opponentUsername: p1Info.username,
+        opponentElo:      p1Info.elo,
       });
     }
 
@@ -390,6 +435,8 @@ export class TournamentService {
       [nextRound, tournamentId],
     );
 
+    const { rows: [t] } = await pool.query('SELECT name FROM tournaments WHERE id=$1', [tournamentId]);
+
     for (const m of newMatches) {
       if (m.isBye && m.player1Id) {
         await pool.query(
@@ -397,35 +444,48 @@ export class TournamentService {
            VALUES ($1,$2,$3,$4,true,$4)`,
           [tournamentId, nextRound, m.matchNumber, m.player1Id],
         );
+        io.to(`user:${m.player1Id}`).emit('tournament.bye_advance', { tournamentId, round: nextRound });
         continue;
       }
 
-      const { rows: [p1] } = await pool.query('SELECT elo FROM users WHERE id=$1', [m.player1Id]);
-      const { rows: [p2] } = await pool.query('SELECT elo FROM users WHERE id=$1', [m.player2Id]);
+      const { rows: [p1] } = await pool.query('SELECT username, elo FROM users WHERE id=$1', [m.player1Id]);
+      const { rows: [p2] } = await pool.query('SELECT username, elo FROM users WHERE id=$1', [m.player2Id]);
 
       const game = await GameService.createGame(
         m.player1Id!, m.player2Id!, '0',
         p1?.elo ?? 1200, p2?.elo ?? 1200,
         initialGameState(),
+        undefined,
+        'waiting',
       );
 
-      await pool.query(
+      const { rows: [matchRow] } = await pool.query(
         `INSERT INTO tournament_matches
            (tournament_id, game_id, round, match_number, player1_id, player2_id)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
+         VALUES ($1,$2,$3,$4,$5,$6)
+         RETURNING id`,
         [tournamentId, game.id, nextRound, m.matchNumber, m.player1Id, m.player2Id],
       );
 
-      await GameTimerService.startTimer(game.id, 1);
-    }
+      await TournamentLobbyService.createLobby(
+        game.id, tournamentId, matchRow.id, m.player1Id!, m.player2Id!,
+      );
 
-    // Notify participants of new round
-    const { rows: [t] } = await pool.query('SELECT name FROM tournaments WHERE id=$1', [tournamentId]);
-    for (const userId of winnerIds) {
-      await NotificationService.send(userId, 'tournament_match_ready', {
-        tournamentName: t?.name, round: nextRound,
+      await NotificationService.send(m.player1Id!, 'tournament_match_ready', { tournamentName: t?.name, round: nextRound });
+      io.to(`user:${m.player1Id}`).emit('tournament.lobby_ready', {
+        tournamentId, gameId: game.id, round: nextRound,
+        opponentId:       m.player2Id,
+        opponentUsername: p2?.username ?? 'Opponent',
+        opponentElo:      p2?.elo ?? 1200,
       });
-      io.to(`user:${userId}`).emit('tournament.match_ready', { tournamentId, round: nextRound });
+
+      await NotificationService.send(m.player2Id!, 'tournament_match_ready', { tournamentName: t?.name, round: nextRound });
+      io.to(`user:${m.player2Id}`).emit('tournament.lobby_ready', {
+        tournamentId, gameId: game.id, round: nextRound,
+        opponentId:       m.player1Id,
+        opponentUsername: p1?.username ?? 'Opponent',
+        opponentElo:      p1?.elo ?? 1200,
+      });
     }
 
     logger.info(`Tournament round ${nextRound} started: ${tournamentId}`);

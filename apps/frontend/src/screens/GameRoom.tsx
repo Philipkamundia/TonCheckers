@@ -3,13 +3,15 @@
  * Client is render-only — all moves validated server-side.
  * Resign button available at any point.
  */
-import { useEffect, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
 import { useStore } from '../store';
 import { useGame, type Board } from '../hooks/useGame';
 import { getAvailableMoves } from '../engine/moves';
 import { PostGame } from './PostGame';
+import { useWebSocket } from '../hooks/useWebSocket';
+import type { TournamentLobbyPayload } from '../store';
 
 const CELL_SIZE = Math.floor((Math.min(window.innerWidth, 400) - 32) / 8);
 
@@ -23,12 +25,28 @@ const PIECE_COLORS: Record<number, string> = {
 export function GameRoom() {
   const { gameId } = useParams<{ gameId: string }>();
   const { showBackButton, haptic } = useTelegram();
-  const { myPlayerNum } = useStore();
+  const { myPlayerNum, activeTournamentId, setPendingTournamentLobby, setActiveTournamentId } = useStore();
+  const { on, emit } = useWebSocket();
+  const navigate = useNavigate();
+
+  // Tournament interrupt — shown when tournament.lobby_ready fires mid-PvP game
+  const [tournamentPrompt, setTournamentPrompt] = useState<TournamentLobbyPayload | null>(null);
 
   const {
     gameState, selectedPiece, setSelectedPiece, invalidMove, makeMove, resign,
     offerDraw, acceptDraw, declineDraw, drawOffer,
   } = useGame(gameId ?? null, myPlayerNum);
+
+  // Listen for tournament lobby_ready while in a PvP game
+  useEffect(() => {
+    return on<TournamentLobbyPayload>('tournament.lobby_ready', (data) => {
+      // Only prompt if we're in an active non-tournament game
+      if (!activeTournamentId) {
+        haptic.warning();
+        setTournamentPrompt(data);
+      }
+    });
+  }, [on, activeTournamentId]);
 
   // Compute legal moves for highlighting — same engine as AI game
   const legalMoves = useMemo(() => {
@@ -52,17 +70,25 @@ export function GameRoom() {
   // Hide back button during game — resign to exit (PRD §16: no custom back)
   useEffect(() => {
     return showBackButton(() => {
-      // Confirm before resigning via back
       if (confirm('Resign the game?')) resign();
     });
   }, [resign]);
 
+  // Route to tournament post-round after game ends in a tournament
+  useEffect(() => {
+    if ((gameState.status === 'completed' || gameState.status === 'crashed') && activeTournamentId) {
+      setActiveTournamentId(null); // clear so next PvP game isn't affected
+      navigate(`/tournaments/${activeTournamentId}/round`, { replace: true });
+    }
+  }, [gameState.status, activeTournamentId]);
+
   if (gameState.status === 'completed' || gameState.status === 'crashed') {
+    if (activeTournamentId) return null; // useEffect above handles navigation
     return <PostGame gameId={gameId!} result={gameState.result} myPlayerNum={myPlayerNum} />;
   }
 
   // Don't render board until we know which player we are — prevents one-frame flip
-  if (!myPlayerNum) {
+  if (!myPlayerNum || gameState.status === 'waiting') {
     return (
       <div style={{ ...styles.container, justifyContent: 'center' }}>
         <p style={{ color: 'var(--tg-theme-hint-color)' }}>Connecting…</p>
@@ -73,6 +99,13 @@ export function GameRoom() {
   const isMyTurn    = gameState.activePlayer === myPlayerNum;
   const remainingSecs = Math.ceil((gameState.remainingMs ?? 0) / 1000);
   const timerColor   = remainingSecs <= 5 ? '#E53935' : 'var(--tg-theme-text-color)'; // PRD §6: red at 5s
+
+  function handleTournamentAccept() {
+    if (!tournamentPrompt) return;
+    resign();
+    setPendingTournamentLobby(tournamentPrompt);
+    navigate(`/tournament-lobby/${tournamentPrompt.gameId}`, { replace: true });
+  }
 
   function handleCellPress(row: number, col: number) {
     if (!isMyTurn || !gameState.board) return;
@@ -113,6 +146,23 @@ export function GameRoom() {
       </div>
 
       {invalidMove && <p style={styles.invalidMove}>{invalidMove}</p>}
+
+      {/* Tournament interrupt overlay */}
+      {tournamentPrompt && (
+        <div style={styles.drawOfferBox}>
+          <p style={styles.drawOfferText}>🏆 Tournament match ready! Round {tournamentPrompt.round}</p>
+          <p style={{ color: 'var(--tg-theme-hint-color)', fontSize: 13, textAlign: 'center', margin: '0 0 10px' }}>
+            vs {tournamentPrompt.opponentUsername} ({tournamentPrompt.opponentElo} ELO)
+          </p>
+          <p style={{ color: 'var(--tg-theme-destructive-text-color)', fontSize: 12, textAlign: 'center', margin: '0 0 10px' }}>
+            Accepting will resign this PvP game
+          </p>
+          <div style={styles.drawOfferBtns}>
+            <button style={styles.acceptBtn} onClick={handleTournamentAccept}>Play Tournament</button>
+            <button style={styles.declineBtn} onClick={() => setTournamentPrompt(null)}>Ignore</button>
+          </div>
+        </div>
+      )}
 
       {/* Draw offer notification */}
       {drawOffer && (

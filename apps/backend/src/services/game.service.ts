@@ -44,6 +44,13 @@ export class GameService {
     return game as GameRecord;
   }
 
+  static async activateGame(gameId: string): Promise<void> {
+    await pool.query(
+      `UPDATE games SET status='active', started_at=COALESCE(started_at,NOW()), updated_at=NOW() WHERE id=$1`,
+      [gameId],
+    );
+  }
+
   static async getGame(gameId: string): Promise<GameRecord | null> {
     const { rows } = await pool.query(
       `SELECT id, mode, status,

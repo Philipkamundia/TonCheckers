@@ -8,7 +8,7 @@ import { useTelegram } from './useTelegram';
 
 export type Square = 0 | 1 | 2 | 3 | 4;
 export type Board  = Square[][];
-export type GameStatus = 'active' | 'completed' | 'crashed';
+export type GameStatus = 'waiting' | 'active' | 'completed' | 'crashed';
 
 export interface GameState {
   board:        Board | null;
@@ -35,7 +35,7 @@ export function useGame(gameId: string | null, myPlayerNumber: 1 | 2 | null) {
     board:        null,
     activePlayer: 1,
     remainingMs:  30_000,
-    status:       'active',
+    status:       'waiting',
   });
   const [selectedPiece, setSelectedPiece] = useState<{ row: number; col: number } | null>(null);
   const [invalidMove, setInvalidMove]     = useState<string | null>(null);
