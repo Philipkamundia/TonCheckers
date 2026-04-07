@@ -20,7 +20,7 @@ import { Deposit }                from './screens/Deposit';
 import { Withdraw }               from './screens/Withdraw';
 import { Profile }                from './screens/Profile';
 import { AdminDashboard }         from './screens/AdminDashboard';
-import { useWebSocket, onGlobal }  from './hooks/useWebSocket';
+import { onGlobal }  from './hooks/useWebSocket';
 
 const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://toncheckers.pages.dev'}/tonconnect-manifest.json`;
 
