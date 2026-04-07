@@ -36,8 +36,9 @@ export const adminRateLimit = rateLimit({
   legacyHeaders: false,
   message: { ok: false, error: 'Too many admin attempts. Try again in 15 minutes.' },
   keyGenerator: (req) => {
-    // Rate limit by IP + wallet combo so legitimate admin isn't blocked by others
     const wallet = req.headers['x-admin-wallet'] as string ?? 'unknown';
-    return `${req.ip}:${wallet.slice(-8)}`;
+    // Normalize IPv6 to avoid ERR_ERL_KEY_GEN_IPV6
+    const ip = (req.ip ?? '').replace(/^::ffff:/, '');
+    return `${ip}:${wallet.slice(-8)}`;
   },
 });
