@@ -26,7 +26,7 @@ export function GameRoom() {
   const { gameId } = useParams<{ gameId: string }>();
   const { showBackButton, haptic } = useTelegram();
   const { myPlayerNum, activeTournamentId, setPendingTournamentLobby, setActiveTournamentId } = useStore();
-  const { on, emit } = useWebSocket();
+  const { on } = useWebSocket();
   const navigate = useNavigate();
 
   // Tournament interrupt — shown when tournament.lobby_ready fires mid-PvP game
