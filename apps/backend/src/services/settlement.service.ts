@@ -38,15 +38,26 @@ export interface DrawResult {
 
 export class SettlementService {
 
-  /** PRD §12: (Stake × 2) × 0.85 */
+  /**
+   * PRD §12: (Stake × 2) × 0.85
+   *
+   * H-03: All arithmetic is done in integer nanoTON (BigInt) to avoid
+   * IEEE 754 floating-point precision errors that accumulate across many
+   * games and prevent treasury reconciliation.
+   */
   static calculateWinPayout(stakeEach: string) {
-    const s          = parseFloat(stakeEach);
-    const prizePool  = s * 2;
-    const platformFee = prizePool * PLATFORM_FEE_PCT;
+    // Convert to nanoTON (integer, 1 TON = 1e9 nanoTON)
+    const stakeNano    = BigInt(Math.round(parseFloat(stakeEach) * 1_000_000_000));
+    const prizeNano    = stakeNano * 2n;
+    // Integer division: floor semantics (platform rounds down, player rounds up)
+    const feeNano      = prizeNano * 15n / 100n;
+    const payoutNano   = prizeNano - feeNano;
+
+    const nanoToTon = (n: bigint) => (Number(n) / 1_000_000_000).toFixed(9);
     return {
-      prizePool:    prizePool.toFixed(9),
-      platformFee:  platformFee.toFixed(9),
-      winnerPayout: (prizePool - platformFee).toFixed(9),
+      prizePool:    nanoToTon(prizeNano),
+      platformFee:  nanoToTon(feeNano),
+      winnerPayout: nanoToTon(payoutNano),
     };
   }
 
@@ -60,7 +71,8 @@ export class SettlementService {
     io?: Server,
   ): Promise<SettlementResult> {
     const { prizePool, platformFee, winnerPayout } = SettlementService.calculateWinPayout(stakeEach);
-    const isTournamentGame = parseFloat(stakeEach) === 0;
+    // N-01: Use explicit string check first to avoid float comparison ambiguity
+    const isTournamentGame = stakeEach === '0' || stakeEach === '0.000000000' || parseFloat(stakeEach) === 0;
 
     const { rows: players } = await pool.query(
       `SELECT id, elo FROM users WHERE id = ANY($1::uuid[])`, [[winnerId, loserId]],

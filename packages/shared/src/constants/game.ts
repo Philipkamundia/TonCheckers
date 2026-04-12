@@ -9,7 +9,9 @@ export const GAME_CONFIG = {
   DISCONNECT_TIMEOUT:       30_000,  // 30 seconds — PRD §6
   MOVE_TIMEOUT:             30_000,  // 30 seconds per move — PRD §6
   MAX_MOVES_WITHOUT_CAPTURE: 50,
-  REPEATED_POSITION_LIMIT:  25,      // PRD §5: draw at 25 repetitions
+  // C-09: Russian/international checkers — threefold repetition rule (3 occurrences = draw).
+  // This matches the engine implementation in hash.ts::isDrawByRepetition().
+  REPEATED_POSITION_LIMIT:  3,
 } as const;
 
 // Stakes configuration (in TON)

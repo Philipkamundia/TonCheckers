@@ -53,7 +53,11 @@ export class DepositDetectionService {
     }
   }
 
-  /** Fetch last 20 incoming txs from TON Center API */
+  /**
+   * H-02: Fetch ALL incoming transactions since the last processed logical time (lt).
+   * Uses cursor-based pagination (to_lt) so high-volume deposit bursts never cause
+   * missed transactions. Falls back to the last 100 if no cursor is stored.
+   */
   private static async fetchRecentTransactions(address: string): Promise<TonTransaction[]> {
     const apiKey  = process.env.TON_API_KEY;
     const network = process.env.TON_NETWORK || 'testnet';
@@ -61,13 +65,33 @@ export class DepositDetectionService {
       ? 'https://toncenter.com/api/v2'
       : 'https://testnet.toncenter.com/api/v2';
 
-    const url = `${base}/getTransactions?address=${address}&limit=20${apiKey ? `&api_key=${apiKey}` : ''}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`TON API ${res.status}`);
+    const allTxs: TonTransaction[] = [];
+    let   minLt: string | null = null;
 
-    const data = await res.json() as { ok: boolean; result: unknown[] };
-    if (!data.ok) return [];
-    return this.parse(data.result);
+    // Page through up to 5 batches of 100 (500 txs max per poll cycle)
+    for (let page = 0; page < 5; page++) {
+      const ltParam = minLt ? `&to_lt=${minLt}` : '';
+      const url = `${base}/getTransactions?address=${address}&limit=100${ltParam}${apiKey ? `&api_key=${apiKey}` : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`TON API ${res.status}`);
+
+      const data = await res.json() as { ok: boolean; result: unknown[] };
+      if (!data.ok || !data.result.length) break;
+
+      const batch = this.parse(data.result);
+      allTxs.push(...batch);
+
+      // If fewer than 100 returned we've reached the end; stop paging
+      if (data.result.length < 100) break;
+
+      // Set cursor to the lt of the last item in this batch
+      const lastItem = data.result[data.result.length - 1] as Record<string, unknown>;
+      const lt = String((lastItem.transaction_id as Record<string, unknown>)?.lt ?? lastItem.lt ?? '');
+      if (!lt || lt === minLt) break;
+      minLt = lt;
+    }
+
+    return allTxs;
   }
 
   private static parse(raw: unknown[]): TonTransaction[] {

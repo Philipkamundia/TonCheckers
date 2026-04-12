@@ -28,13 +28,15 @@ async function recoverOrphanedLocks(): Promise<void> {
     // 1. No active or waiting game
     // 2. No waiting matchmaking queue entry
     // 3. Lock has been sitting for > ORPHAN_THRESHOLD_MINS (use updated_at on balances)
+    // M-06: Use locked_at (set when lock is first acquired) rather than updated_at
+    // (which changes on every balance operation) so orphaned locks are reliably detected.
     const { rows } = await pool.query<{
       user_id: string; locked: string;
     }>(
       `SELECT b.user_id, b.locked::text
        FROM balances b
        WHERE b.locked > 0
-         AND b.updated_at < NOW() - INTERVAL '${ORPHAN_THRESHOLD_MINS} minutes'
+         AND COALESCE(b.locked_at, b.updated_at) < NOW() - INTERVAL '${ORPHAN_THRESHOLD_MINS} minutes'
          AND NOT EXISTS (
            SELECT 1 FROM games g
            WHERE g.status IN ('active', 'waiting')

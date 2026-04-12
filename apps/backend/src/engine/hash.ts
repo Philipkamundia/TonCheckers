@@ -22,11 +22,15 @@ export function countRepetitions(history: string[], hash: string): number {
 
 /**
  * Russian checkers draw condition: same position repeated 3 times.
- * No piece-count restriction (unlike the old 25-rep / <5 pieces rule).
+ *
+ * C-09: This is the correct threshold per Russian/international checkers rules.
+ * The shared constant REPEATED_POSITION_LIMIT (25) was incorrect and has been
+ * updated to 3 to match this implementation.
+ * Reference: FIDE Draughts rules §6 — threefold repetition.
  */
 export function isDrawByRepetition(
-  history:  string[],
-  hash:     string,
+  history:   string[],
+  hash:      string,
   _p1Pieces: number,
   _p2Pieces: number,
 ): boolean {

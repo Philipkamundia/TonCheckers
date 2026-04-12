@@ -15,6 +15,26 @@ import { WithdrawalService } from './withdrawal.service.js';
 import { logger } from '../utils/logger.js';
 
 export class AdminService {
+  /** N-03: Append a row to admin_audit_log for forensic trail */
+  static async logAdminAction(
+    adminWallet: string,
+    action:      string,
+    targetUserId?: string,
+    metadata?:   Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await pool.query(
+        `INSERT INTO admin_audit_log (admin_wallet, action, target_user_id, metadata, created_at)
+         VALUES ($1, $2, $3, $4, NOW())`,
+        [adminWallet, action, targetUserId ?? null, metadata ? JSON.stringify(metadata) : null],
+      );
+    } catch (err) {
+      // Never let audit logging crash an admin action — log and move on
+      logger.error(`Admin audit log failed: ${(err as Error).message}`);
+    }
+  }
+
+
 
   // ─── Withdrawal Queue ─────────────────────────────────────────────────────
 

@@ -67,6 +67,11 @@ export const useStore = create<AppStore>((set, get) => ({
   setUser:    (user)           => set({ user }),
   setBalance: (balance)        => set({ balance }),
   setTokens:  (access, refresh) => {
+    // M-09: Tokens are stored in localStorage as required for Telegram Mini Apps
+    // (httpOnly cookies are not reliably accessible in the Telegram WebView).
+    // Mitigations: short-lived access tokens (24h), refresh tokens (7d),
+    // tokens are cleared on any 401 response in api.ts, and the Telegram
+    // Mini App sandbox limits third-party script injection vectors.
     localStorage.setItem('access_token',  access);
     localStorage.setItem('refresh_token', refresh);
     set({ accessToken: access });

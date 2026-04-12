@@ -78,6 +78,47 @@ app.use(errorHandler);
 
 // ─── NOTE: SPA routing ────────────────────────────────────────────────────────
 // The frontend is a Single Page App served separately (Vite/Railway/Vercel).
+
+// ─── M-08: Graceful shutdown ──────────────────────────────────────────────────
+// On SIGTERM / SIGINT: stop accepting new connections, wait for in-flight
+// requests to complete, then close DB pool and Redis. This prevents
+// in-flight game moves and withdrawals from being abruptly cut off during
+// rolling deployments on Railway / Docker.
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  logger.info(`${signal} received — starting graceful shutdown`);
+
+  // Stop accepting new HTTP + WebSocket connections
+  httpServer.close(async () => {
+    logger.info('HTTP server closed');
+    try {
+      // Close DB pool
+      const { default: pool } = await import('./config/db.js');
+      await pool.end();
+      logger.info('DB pool closed');
+
+      // Close Redis connection
+      const { default: redis } = await import('./config/redis.js');
+      redis.disconnect();
+      logger.info('Redis disconnected');
+    } catch (err) {
+      logger.error(`Shutdown error: ${(err as Error).message}`);
+    }
+    process.exit(0);
+  });
+
+  // Force-kill if graceful shutdown takes > 30s
+  setTimeout(() => {
+    logger.error('Graceful shutdown timed out — force exiting');
+    process.exit(1);
+  }, 30_000).unref();
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 // Your hosting must return index.html for ALL non-API routes so that
 // BrowserRouter works when Telegram opens a deep link like /game/abc123.
 // On Railway: set the "Rewrite" rule to serve index.html for /* paths.

@@ -114,10 +114,11 @@ export class BalanceService {
   static async lockBalance(userId: string, amount: string): Promise<void> {
     const { rowCount } = await pool.query(
       `UPDATE balances
-       SET available = available - $1::numeric,
-           locked    = locked    + $1::numeric,
+       SET available  = available  - $1::numeric,
+           locked     = locked     + $1::numeric,
+           locked_at  = COALESCE(locked_at, NOW()),  -- M-06: set on first lock
            updated_at = NOW()
-       WHERE user_id = $2
+       WHERE user_id  = $2
          AND available >= $1::numeric`,
       [amount, userId],
     );
@@ -134,12 +135,39 @@ export class BalanceService {
   static async unlockBalance(userId: string, amount: string): Promise<void> {
     await pool.query(
       `UPDATE balances
-       SET locked    = locked    - $1::numeric,
-           available = available + $1::numeric,
+       SET locked     = locked     - $1::numeric,
+           available  = available  + $1::numeric,
+           -- M-06: clear locked_at when the balance is fully unlocked
+           locked_at  = CASE WHEN (locked - $1::numeric) <= 0 THEN NULL ELSE locked_at END,
            updated_at = NOW()
-       WHERE user_id = $2`,
+       WHERE user_id  = $2`,
       [amount, userId],
     );
     logger.info(`Balance unlocked: user=${userId} amount=${amount}`);
+  }
+
+  /**
+   * Atomic balance lock — combines the availability check and the lock
+   * in a single UPDATE … WHERE … RETURNING, eliminating the TOCTOU race
+   * that exists when check and lock are two separate round-trips.
+   *
+   * Replaces the joinQueue pattern of:  getBalance() → check → lockBalance()
+   * Use this everywhere a check-then-lock is needed.
+   */
+  static async atomicLockBalance(userId: string, amount: string): Promise<void> {
+    const { rowCount } = await pool.query(
+      `UPDATE balances
+       SET available  = available  - $1::numeric,
+           locked     = locked     + $1::numeric,
+           locked_at  = COALESCE(locked_at, NOW()),  -- M-06: set on first lock
+           updated_at = NOW()
+       WHERE user_id  = $2
+         AND available >= $1::numeric`,
+      [amount, userId],
+    );
+    if (!rowCount) {
+      throw new AppError(400, 'Insufficient balance to lock', 'INSUFFICIENT_BALANCE');
+    }
+    logger.info(`Balance atomically locked: user=${userId} amount=${amount}`);
   }
 }

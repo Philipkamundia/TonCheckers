@@ -8,7 +8,8 @@
  * - Opponent resigns (handled by WebSocket handler, not here)
  *
  * PRD §5 Draw Conditions:
- * - Both players have < 5 pieces AND same position repeated 25 times
+ * - Same position repeated 3 times (threefold repetition — Russian checkers rule)
+ * - 50 consecutive moves without a capture (N-05: no-capture draw rule)
  */
 
 import {
@@ -21,22 +22,27 @@ import { hashBoardState, isDrawByRepetition } from './hash.js';
 export type GameResult =
   | { status: 'ongoing' }
   | { status: 'win';  winner: Player; reason: 'no_pieces' | 'no_moves' | 'timeout' | 'resign' }
-  | { status: 'draw'; reason: 'repetition' };
+  | { status: 'draw'; reason: 'repetition' | 'no_capture_limit' };
+
+// N-05: Maximum consecutive moves without a capture before a draw is declared.
+const MAX_MOVES_WITHOUT_CAPTURE = 50;
 
 /**
  * Check win/draw conditions after a move has been applied.
  *
  * Called AFTER the move is applied and active player has switched
- * to the player who must now move.
+ * to the player who must move next.
  *
- * @param board         Current board (after move applied + kings promoted)
- * @param activePlayer  Player who must move next
- * @param history       Board hash history (for draw detection)
+ * @param board               Current board (after move applied + kings promoted)
+ * @param activePlayer        Player who must move next
+ * @param history             Board hash history (for repetition draw detection)
+ * @param movesSinceCapture   Count of consecutive moves with no capture (for 50-move rule)
  */
 export function checkWinCondition(
-  board:        Board,
-  activePlayer: Player,
-  history:      string[],
+  board:              Board,
+  activePlayer:       Player,
+  history:            string[],
+  movesSinceCapture = 0,
 ): GameResult {
   const opponent: Player = activePlayer === 1 ? 2 : 1;
 
@@ -54,10 +60,15 @@ export function checkWinCondition(
     return { status: 'win', winner: opponent, reason: 'no_moves' };
   }
 
-  // Draw: position repetition (PRD §5)
+  // Draw: position repetition — threefold repetition rule (Russian checkers)
   const hash = hashBoardState(board, activePlayer);
   if (isDrawByRepetition(history, hash, activePieces, opponentPieces)) {
     return { status: 'draw', reason: 'repetition' };
+  }
+
+  // N-05: Draw: 50 consecutive moves without a capture
+  if (movesSinceCapture >= MAX_MOVES_WITHOUT_CAPTURE) {
+    return { status: 'draw', reason: 'no_capture_limit' };
   }
 
   return { status: 'ongoing' };

@@ -136,7 +136,8 @@ async function checkOnChain(hotWallet: string, destination: string, amount: stri
       ? 'https://toncenter.com/api/v2'
       : 'https://testnet.toncenter.com/api/v2';
 
-    const url = `${base}/getTransactions?address=${hotWallet}&limit=20${apiKey ? `&api_key=${apiKey}` : ''}`;
+    // N-04: Fetch 100 transactions to avoid missing the tx if many withdrawals occurred
+    const url = `${base}/getTransactions?address=${hotWallet}&limit=100${apiKey ? `&api_key=${apiKey}` : ''}`;
     const res  = await fetch(url);
     if (!res.ok) return null;
 
@@ -152,7 +153,7 @@ async function checkOnChain(hotWallet: string, destination: string, amount: stri
         const value = Number(msg.value || 0);
         if (
           dest.toLowerCase() === destination.toLowerCase() &&
-          Math.abs(value - expectedNano) < 10_000_000  // within 0.01 TON tolerance for fees
+          Math.abs(value - expectedNano) < 10_000  // M-03: within 0.00001 TON (gas only, not 0.01)
         ) {
           return String((item.transaction_id as Record<string, unknown>)?.hash ?? item.hash ?? '');
         }

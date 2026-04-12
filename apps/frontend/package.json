@@ -10,6 +10,7 @@
     "lint":    "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
+    "@telegram-apps/analytics": "^1.4.4",
     "@tonconnect/ui-react": "^2.0.0",
     "@sentry/react":        "^8.0.0",
     "react":               "^18.2.0",

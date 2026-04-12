@@ -38,16 +38,13 @@ export class MatchmakingService {
       throw new AppError(409, 'Already in queue', 'ALREADY_QUEUED');
     }
 
-    const balance = await BalanceService.getBalance(userId);
-    if (parseFloat(balance.available) < stakeNum) {
-      throw new AppError(400, 'Insufficient balance', 'INSUFFICIENT_BALANCE');
-    }
-
     const { rows: [user] } = await pool.query('SELECT elo, is_banned FROM users WHERE id=$1', [userId]);
     if (!user) throw new AppError(404, 'User not found', 'NOT_FOUND');
     if (user.is_banned) throw new AppError(403, 'Account is banned', 'BANNED');
 
-    await BalanceService.lockBalance(userId, stake);
+    // C-04: Use atomic lock — combines availability check + lock in one DB round-trip,
+    // eliminating the TOCTOU race between getBalance() and lockBalance().
+    await BalanceService.atomicLockBalance(userId, stake);
 
     const now = Date.now();
     try {

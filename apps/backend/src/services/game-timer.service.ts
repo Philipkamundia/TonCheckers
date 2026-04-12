@@ -52,7 +52,16 @@ export class GameTimerService {
   }
 
   static async getExpiredGames(): Promise<Array<{ gameId: string; timedOutPlayer: 1 | 2 }>> {
-    const gameIds = await redis.smembers(ACTIVE_SET);
+    // M-05: Use SSCAN instead of SMEMBERS to avoid a large blocking read when there
+    // are many active games. SSCAN iterates the set in batches (cursor-based).
+    const gameIds: string[] = [];
+    let cursor = '0';
+    do {
+      const [nextCursor, batch] = await redis.sscan(ACTIVE_SET, cursor, 'COUNT', 100);
+      gameIds.push(...batch);
+      cursor = nextCursor;
+    } while (cursor !== '0');
+
     const expired: Array<{ gameId: string; timedOutPlayer: 1 | 2 }> = [];
 
     for (const gameId of gameIds) {

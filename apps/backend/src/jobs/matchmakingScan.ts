@@ -24,6 +24,7 @@ import { logger } from '../utils/logger.js';
 
 const LOBBY_COUNTDOWN_MS    = 10_000;
 const COUNTDOWN_CANCEL_KEY  = 'lobby:cancel:';
+const MAX_QUEUE_WAIT_MS     = 10 * 60 * 1_000; // N-07: 10 minutes max wait
 
 // Track active lobby countdowns: gameId → { p1, p2, stake, timeout }
 const activeLobbies = new Map<string, {
@@ -44,6 +45,24 @@ async function runScan(io: Server): Promise<void> {
     if (entries.length < 2) return;
 
     const paired = new Set<string>();
+    const now_    = Date.now();
+
+    // N-07: Expire players who have waited longer than MAX_QUEUE_WAIT_MS.
+    // Their stake is unlocked and they receive an 'mm.timeout' notification
+    // so they know to re-queue manually.
+    for (const entry of entries) {
+      if (now_ - entry.joinedAt >= MAX_QUEUE_WAIT_MS) {
+        logger.info(`Queue timeout: user=${entry.userId} waited ${Math.round((now_ - entry.joinedAt) / 60_000)}min — removing`);
+        try {
+          await MatchmakingService.removeFromQueue(entry.userId, entry.stake, true);
+          io.to(`user:${entry.userId}`).emit('mm.timeout', {
+            reason: 'No match found after 10 minutes — stake returned. Please try again.',
+          });
+        } catch (err) {
+          logger.error(`Queue timeout removal failed for user=${entry.userId}: ${(err as Error).message}`);
+        }
+      }
+    }
 
     for (const seeker of entries) {
       if (paired.has(seeker.userId)) continue;
@@ -200,21 +219,20 @@ function startLobbyCountdown(
         return;
       }
 
-      // Also check DB status — the Redis cancel flag may have expired under load
-      // but cancelLobby() already set the game to 'cancelled' in the DB
-      const { rows: [game] } = await pool.query(
-        `SELECT status FROM games WHERE id=$1`, [gameId],
-      );
-      if (!game || game.status === 'cancelled') {
-        logger.info(`Lobby timeout: game=${gameId} already cancelled (Redis flag may have expired)`);
-        return;
-      }
-
-      // Start the game — update DB status to active, start timer
-      await pool.query(
-        `UPDATE games SET status='active', started_at=NOW(), updated_at=NOW() WHERE id=$1`,
+      // M-04: Trust only the DB CAS for the cancel check. The Redis flag is a
+      // fast-path hint but can be lost under load. Use an atomic UPDATE … WHERE
+      // status='waiting' as the single authoritative gate — only one path wins.
+      const { rowCount: activatedCount } = await pool.query(
+        `UPDATE games SET status='active', started_at=NOW(), updated_at=NOW()
+         WHERE id=$1 AND status='waiting'`,
         [gameId],
       );
+
+      if (!activatedCount) {
+        // Game was already cancelled (or activated by another process) — nothing to do
+        logger.info(`Lobby timeout: game=${gameId} already resolved (status was not 'waiting')`);
+        return;
+      }
       await GameTimerService.startTimer(gameId, 1);
 
       io.to(`user:${player1Id}`).emit('mm.game_start', { gameId, playerNumber: 1 });

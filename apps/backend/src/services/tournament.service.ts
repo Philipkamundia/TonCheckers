@@ -34,6 +34,14 @@ export class TournamentService {
     }
     if (parseFloat(entryFee) < 0) throw new AppError(400, 'Entry fee cannot be negative', 'INVALID_ENTRY_FEE');
 
+    // M-01: Sanitise tournament name — enforce length limit and strip HTML
+    // to prevent stored XSS via tournament names rendered in the frontend.
+    if (!name || typeof name !== 'string') throw new AppError(400, 'Tournament name is required', 'INVALID_NAME');
+    const sanitisedName = name.trim().replace(/<[^>]*>/g, '');
+    if (sanitisedName.length === 0)   throw new AppError(400, 'Tournament name cannot be empty', 'INVALID_NAME');
+    if (sanitisedName.length > 100)   throw new AppError(400, 'Tournament name must be 100 characters or fewer', 'INVALID_NAME');
+    name = sanitisedName;
+
     const startDate = new Date(startsAt);
     if (isNaN(startDate.getTime()) || startDate <= new Date()) {
       throw new AppError(400, 'Start time must be a valid future date', 'INVALID_START_TIME');

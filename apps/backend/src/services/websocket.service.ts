@@ -45,36 +45,30 @@ export class WebSocketService {
       const userId = (socket as Socket & { userId: string }).userId;
       logger.debug(`WS connect: ${socket.id} user=${userId}`);
 
-      // Per-socket rate limiting
-      let windowStart  = Date.now();
-      let eventCount   = 0;
-      const moveCounts = new Map<string, { count: number; windowStart: number }>();
+      // H-07: Per-USER rate limiting backed by Redis so limits persist across
+      // reconnects and hold across all server processes.
+      // Key format: ws:rl:{userId}:{eventType}:{windowSecond}
+      const redis_ = (await import('../config/redis.js')).default;
 
-      socket.use(([event], next) => {
-        const now = Date.now();
+      socket.use(async ([event], next) => {
+        const windowSec = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS);
 
-        // Reset general window
-        if (now - windowStart > RATE_LIMIT_WINDOW_MS) {
-          windowStart = now;
-          eventCount  = 0;
-        }
-        eventCount++;
-        if (eventCount > RATE_LIMIT_MAX) {
-          logger.warn(`WS rate limit exceeded: socket=${socket.id} user=${userId} event=${event}`);
-          return; // drop silently — don't call next()
+        // General event limit
+        const generalKey = `ws:rl:${userId}:general:${windowSec}`;
+        const generalCount = await redis_.incr(generalKey);
+        if (generalCount === 1) await redis_.expire(generalKey, 2);
+        if (generalCount > RATE_LIMIT_MAX) {
+          logger.warn(`WS rate limit exceeded: user=${userId} event=${event}`);
+          return; // drop silently
         }
 
         // Stricter limit for move events
         if (MOVE_EVENTS.has(event)) {
-          const mc = moveCounts.get(event) ?? { count: 0, windowStart: now };
-          if (now - mc.windowStart > RATE_LIMIT_WINDOW_MS) {
-            mc.count = 0;
-            mc.windowStart = now;
-          }
-          mc.count++;
-          moveCounts.set(event, mc);
-          if (mc.count > MOVE_LIMIT_MAX) {
-            logger.warn(`WS move rate limit exceeded: socket=${socket.id} user=${userId}`);
+          const moveKey   = `ws:rl:${userId}:moves:${windowSec}`;
+          const moveCount = await redis_.incr(moveKey);
+          if (moveCount === 1) await redis_.expire(moveKey, 2);
+          if (moveCount > MOVE_LIMIT_MAX) {
+            logger.warn(`WS move rate limit exceeded: user=${userId}`);
             socket.emit('game.move_invalid', { reason: 'Too many moves — slow down' });
             return;
           }

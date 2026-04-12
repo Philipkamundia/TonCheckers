@@ -78,18 +78,26 @@ export class WithdrawalService {
       throw new AppError(429, `Withdrawal cooldown active. Try again in ${Math.ceil(ttl / 60)} minutes.`, 'COOLDOWN_ACTIVE');
     }
 
-    // 3. Daily limit check — applies to ALL withdrawals including those requiring review
-    const utcDate   = new Date().toISOString().slice(0, 10);
-    const dailyKey  = `${DAILY_PREFIX}${userId}:${utcDate}`;
-    const dailyStr  = await redis.get(dailyKey);
-    const dailyUsed = parseFloat(dailyStr || '0');
+    // 3. Daily limit check — atomic INCRBYFLOAT prevents the race condition
+    // where two concurrent requests both read 0 and both pass the limit check.
+    const utcDate = new Date().toISOString().slice(0, 10);
+    const dailyKey = `${DAILY_PREFIX}${userId}:${utcDate}`;
+    const secsUntilMidnightForLimit = WithdrawalService.secsUntilUtcMidnight();
 
     // requiresReview routes to admin queue but still counts against the daily total
     const requiresReview = amountNum >= MAX_DAILY_TON;
 
-    if ((dailyUsed + amountNum) > MAX_DAILY_TON && !requiresReview) {
-      const remaining = MAX_DAILY_TON - dailyUsed;
-      throw new AppError(400, `Daily limit reached. You can withdraw up to ${remaining.toFixed(2)} TON today.`, 'DAILY_LIMIT_EXCEEDED');
+    if (!requiresReview) {
+      // Atomically increment — if the result exceeds the limit, roll back immediately
+      const newDailyTotal = await redis.incrbyfloat(dailyKey, amountNum);
+      await redis.expire(dailyKey, secsUntilMidnightForLimit);
+      if (newDailyTotal > MAX_DAILY_TON) {
+        // Roll back the increment
+        await redis.incrbyfloat(dailyKey, -amountNum);
+        const used = newDailyTotal - amountNum;
+        const remaining = Math.max(0, MAX_DAILY_TON - used);
+        throw new AppError(400, `Daily limit reached. You can withdraw up to ${remaining.toFixed(2)} TON today.`, 'DAILY_LIMIT_EXCEEDED');
+      }
     }
 
     // 4. Balance check + immediate deduction
@@ -118,9 +126,13 @@ export class WithdrawalService {
       client.release();
     }
 
-    // 6. Always update daily total — counts against limit regardless of review status
-    const secsUntilMidnight = WithdrawalService.secsUntilUtcMidnight();
-    await redis.set(dailyKey, (dailyUsed + amountNum).toFixed(9), 'EX', secsUntilMidnight);
+    // 6. For review-required withdrawals, update daily total separately.
+    // Non-review withdrawals already updated the daily counter atomically in step 3.
+    if (requiresReview) {
+      const secsUntilMidnight = WithdrawalService.secsUntilUtcMidnight();
+      await redis.incrbyfloat(dailyKey, amountNum);
+      await redis.expire(dailyKey, secsUntilMidnight);
+    }
 
     // Cooldown set only after successful on-chain send (inside processWithdrawal)
 
@@ -149,7 +161,7 @@ export class WithdrawalService {
   ): Promise<void> {
     try {
       // Note: transaction is already status='processing' from requestWithdrawal INSERT
-      const txHash = await WithdrawalService.sendTonTransfer(destination, amount);
+      const txHash = await WithdrawalService.sendTonTransfer(destination, amount, transactionId);
 
       // If hash is synthetic (polling exhausted), keep status as 'processing'
       // so the recovery job will retry on-chain lookup. Do NOT refund yet.
@@ -177,10 +189,17 @@ export class WithdrawalService {
       await NotificationService.send(userId, 'withdrawal_processed', { amount, txHash });
       logger.info(`Withdrawal sent: user=${userId} amount=${amount} TON hash=${txHash}`);
     } catch (err) {
+      // Always release the hot-wallet lock on error so the next withdrawal can proceed
+      try { const r = (await import('../config/redis.js')).default; await r.del('withdrawal:hot_wallet_lock'); } catch {}
       await pool.query(
         `UPDATE transactions SET status='failed', updated_at=NOW() WHERE id=$1`,
         [transactionId],
       );
+      // M-02: Set cooldown even on failure to prevent rapid-fire retry loops
+      if (cooldownKey) {
+        const r = (await import('../config/redis.js')).default;
+        await r.set(cooldownKey, '1', 'EX', COOLDOWN_SECS).catch(() => {});
+      }
       // Refund on failure
       await BalanceService.creditBalance(userId, amount).catch(refundErr => {
         logger.error(`CRITICAL: withdrawal refund failed user=${userId} amount=${amount}: ${(refundErr as Error).message}`);
@@ -199,7 +218,7 @@ export class WithdrawalService {
    * 3. Sign and send via TonClient connected to TON network
    * 4. Return transaction hash
    */
-  static async sendTonTransfer(destination: string, amount: string): Promise<string> {
+  static async sendTonTransfer(destination: string, amount: string, transactionId?: string): Promise<string> {
     const mnemonic = process.env.HOT_WALLET_MNEMONIC;
     const network  = process.env.TON_NETWORK || 'testnet';
     const apiKey   = process.env.TON_API_KEY;
@@ -222,6 +241,15 @@ export class WithdrawalService {
     const networkGlobalId = network === 'mainnet' ? -239 : -3;
     const wallet   = WalletContractV5R1.create({ publicKey: keyPair.publicKey, workchain: 0, walletId: { networkGlobalId } });
     const contract = client.open(wallet);
+
+    // H-05: Acquire hot-wallet serialization lock to prevent two concurrent withdrawals
+    // from reading the same seqno and broadcasting conflicting transactions.
+    // 30-second TTL is enough for seqno fetch + broadcast; released explicitly after send.
+    const redis = (await import('../config/redis.js')).default;
+    const lockAcquired = await redis.set('withdrawal:hot_wallet_lock', transactionId ?? 'lock', 'PX', 30_000, 'NX');
+    if (!lockAcquired) {
+      throw new Error('Hot wallet busy — another withdrawal is in progress. Retry in a moment.');
+    }
 
     let seqno: number;
     try {
@@ -249,6 +277,9 @@ export class WithdrawalService {
       throw new Error(`TON transfer failed (network=${network} dest=${destination} amount=${amount}): ${msg}`);
     }
 
+    // Release hot-wallet lock now that the transfer has been broadcast (seqno consumed)
+    await redis.del('withdrawal:hot_wallet_lock');
+
     // Transfer was broadcast. Now poll for the real hash with retries.
     // We use seqno+destination+amount to identify the exact tx — not just "last tx".
     const base        = network === 'mainnet' ? 'https://toncenter.com/api/v2' : 'https://testnet.toncenter.com/api/v2';
@@ -271,7 +302,7 @@ export class WithdrawalService {
             const value = Number(msg.value || 0);
             if (
               dest.toLowerCase() === destination.toLowerCase() &&
-              Math.abs(value - expectedNano) < 10_000_000
+              Math.abs(value - expectedNano) < 10_000  // M-03: tight tolerance (gas only)
             ) {
               const txHash = String(
                 (item.transaction_id as Record<string, unknown>)?.hash ?? item.hash ?? '',
@@ -288,9 +319,9 @@ export class WithdrawalService {
       }
     }
 
-    // All polling attempts exhausted — store a traceable synthetic hash.
-    // The recovery job will attempt on-chain lookup again using destination+amount.
-    // IMPORTANT: this tx is stored as 'processing' not 'confirmed' so recovery can retry.
+    // All polling attempts exhausted — store a traceable synthetic hash that embeds
+    // the seqno for precise on-chain matching in the recovery job.
+    // H-06: The seqno is the authoritative identifier for the exact on-chain tx.
     const syntheticHash = `pending:${hotAddr}:seq${seqno}:${Date.now()}`;
     logger.warn(`TON transfer hash unconfirmed after 5 attempts — stored as pending: ${amount} TON → ${destination} seqno=${seqno}`);
     return syntheticHash;
