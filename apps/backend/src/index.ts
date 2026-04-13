@@ -24,6 +24,7 @@ import { startTournamentBracketCheck } from './jobs/tournamentBracketCheck.js';
 import { startLeaderboardRebuild } from './jobs/leaderboardRebuild.js';
 import { startWithdrawalRecoveryJob } from './jobs/withdrawalRecovery.js';
 import { startOrphanedLockRecoveryJob } from './jobs/orphanedLockRecovery.js';
+import { startBalanceReconciliationJob } from './jobs/balanceReconciliation.js';
 import { logger } from './utils/logger.js';
 import { runMigrations } from './migrate.js';
 
@@ -143,6 +144,7 @@ httpServer.listen(PORT, async () => {
   startLeaderboardRebuild();
   startWithdrawalRecoveryJob();
   startOrphanedLockRecoveryJob();
+  startBalanceReconciliationJob();
 
   try {
     await DepositDetectionService.start();

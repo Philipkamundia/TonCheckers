@@ -109,4 +109,24 @@ export const adminController = {
       res.json({ ok: true, ...data });
     } catch (err) { next(err); }
   },
+  getReconciliationHistory: async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const limit = Math.min(parseInt(String(req.query.limit ?? '24'), 10), 100);
+      const { rows } = await (await import('../config/db.js')).default.query(
+        `SELECT * FROM reconciliation_log ORDER BY created_at DESC LIMIT $1`, [limit],
+      );
+      res.json({ ok: true, snapshots: rows });
+    } catch (err) { next(err); }
+  },
+
+  triggerReconciliation: async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { runReconciliation } = await import('../jobs/balanceReconciliation.js');
+      // Fire-and-forget — don't await so HTTP response is immediate
+      runReconciliation().catch(err =>
+        console.error('On-demand reconciliation error:', (err as Error).message),
+      );
+      res.json({ ok: true, message: 'Reconciliation triggered — results will appear in logs and /admin/reconciliation' });
+    } catch (err) { next(err); }
+  },
 };

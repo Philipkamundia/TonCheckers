@@ -189,6 +189,46 @@ describe('TournamentService.createTournament — validation', () => {
       TournamentService.createTournament(CREATOR_ID, 'Test', 8, '1', 'not-a-date'),
     ).rejects.toMatchObject({ code: 'INVALID_START_TIME' });
   });
+
+  // M-01: Name sanitisation
+  it('throws INVALID_NAME for empty name', async () => {
+    await expect(
+      TournamentService.createTournament(CREATOR_ID, '', 8, '1', FUTURE_DATE),
+    ).rejects.toMatchObject({ code: 'INVALID_NAME' });
+  });
+
+  it('throws INVALID_NAME for whitespace-only name', async () => {
+    await expect(
+      TournamentService.createTournament(CREATOR_ID, '   ', 8, '1', FUTURE_DATE),
+    ).rejects.toMatchObject({ code: 'INVALID_NAME' });
+  });
+
+  it('throws INVALID_NAME for name longer than 100 characters', async () => {
+    const longName = 'a'.repeat(101);
+    await expect(
+      TournamentService.createTournament(CREATOR_ID, longName, 8, '1', FUTURE_DATE),
+    ).rejects.toMatchObject({ code: 'INVALID_NAME' });
+  });
+
+  it('strips HTML tags from tournament name (XSS prevention)', async () => {
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: TOURNAMENT_ID, name: 'Cool Tournament', bracketSize: 8, entryFee: '1',
+               prizePool: '0', status: 'open', startsAt: FUTURE_DATE, createdAt: new Date().toISOString() }],
+    });
+    // The pool.query call receives the sanitised name — we verify the argument
+    const t = await TournamentService.createTournament(
+      CREATOR_ID, '<script>alert(1)</script>Cool Tournament', 8, '1', FUTURE_DATE,
+    );
+    // The DB was called with the sanitised name (script tags stripped)
+    const insertCall = (mockQuery as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: unknown[]) => String(c[0]).includes('INSERT INTO tournaments'),
+    );
+    expect(insertCall).toBeDefined();
+    const nameArg = String(insertCall![1][1]); // second positional param = name
+    expect(nameArg).not.toContain('<script>');
+    expect(nameArg).toContain('Cool Tournament');
+    expect(t).toBeDefined();
+  });
 });
 
 // ─── TournamentService.joinTournament ────────────────────────────────────────

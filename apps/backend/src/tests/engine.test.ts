@@ -6,7 +6,7 @@
  * ✅ Multi-jump chain completes in one turn
  * ✅ Regular pieces can capture backward
  * ✅ King promotion does not occur mid-chain
- * ✅ Draw detected at 25 repetitions with < 5 pieces each side
+ * ✅ Draw detected at 3 repetitions (threefold repetition rule)
  */
 
 import { describe, it, expect } from 'vitest';
@@ -359,6 +359,26 @@ describe('Draw by repetition (Russian checkers: 3×)', () => {
     expect(result.status).toBe('draw');
     if (result.status === 'draw') expect(result.reason).toBe('repetition');
   });
+
+  // N-05: 50-move no-capture draw rule
+  it('NOT a draw at 49 consecutive moves without capture', () => {
+    const b = initialBoard();
+    const result = checkWinCondition(b, 1, [], 49);
+    expect(result.status).toBe('ongoing');
+  });
+
+  it('IS a draw at exactly 50 consecutive moves without capture', () => {
+    const b = initialBoard();
+    const result = checkWinCondition(b, 1, [], 50);
+    expect(result.status).toBe('draw');
+    if (result.status === 'draw') expect(result.reason).toBe('no_capture_limit');
+  });
+
+  it('movesSinceCapture=0 (default) — normal game continues', () => {
+    const b = initialBoard();
+    const result = checkWinCondition(b, 1, []);
+    expect(result.status).toBe('ongoing');
+  });
 });
 
 // ─── Russian Rules ────────────────────────────────────────────────────────────
@@ -393,15 +413,17 @@ describe('Maximum capture sequence (Russian checkers)', () => {
 });
 
 describe('Flying kings (Russian checkers)', () => {
-  it('king can slide multiple squares diagonally', () => {
+  it('king moves one square diagonally in any direction', () => {
     const b = buildBoard([[4, 4, P1_KING]]);
     const moves = getAvailableMoves(b, 1);
     const targets = moves.map(m => `${m.to.row},${m.to.col}`);
-    // Should reach squares more than 1 step away
-    expect(targets).toContain('0,0'); // 4 steps up-left
-    expect(targets).toContain('7,7'); // 3 steps down-right
-    expect(targets).toContain('1,7'); // 3 steps up-right
-    expect(targets).toContain('7,1'); // 3 steps down-left
+    // Kings move exactly one square when not capturing
+    expect(targets).toContain('3,3');
+    expect(targets).toContain('3,5');
+    expect(targets).toContain('5,3');
+    expect(targets).toContain('5,5');
+    expect(targets).not.toContain('0,0');
+    expect(targets).not.toContain('7,7');
   });
 
   it('king is blocked by own piece', () => {
@@ -420,15 +442,15 @@ describe('Flying kings (Russian checkers)', () => {
     expect(targets).not.toContain('1,5');
   });
 
-  it('king captures by flying over opponent and landing beyond', () => {
+  it('king captures by landing on the immediate square after opponent', () => {
     const b = buildBoard([[6, 0, P1_KING], [4, 2, P2]]);
     const moves = getAvailableMoves(b, 1);
     const captures = moves.filter(m => m.captures.length > 0);
     expect(captures.length).toBeGreaterThan(0);
-    // Can land at (3,3), (2,4), (1,5), (0,6) — all squares past the captured piece
+    // Can only land at the first empty square after the captured piece
     const landingSquares = captures.map(m => `${m.to.row},${m.to.col}`);
     expect(landingSquares).toContain('3,3');
-    expect(landingSquares).toContain('2,4');
+    expect(landingSquares).not.toContain('2,4');
   });
 });
 

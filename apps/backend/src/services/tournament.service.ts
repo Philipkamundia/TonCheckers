@@ -40,7 +40,7 @@ export class TournamentService {
     const sanitisedName = name.trim().replace(/<[^>]*>/g, '');
     if (sanitisedName.length === 0)   throw new AppError(400, 'Tournament name cannot be empty', 'INVALID_NAME');
     if (sanitisedName.length > 100)   throw new AppError(400, 'Tournament name must be 100 characters or fewer', 'INVALID_NAME');
-    name = sanitisedName;
+    const validatedName = sanitisedName;
 
     const startDate = new Date(startsAt);
     if (isNaN(startDate.getTime()) || startDate <= new Date()) {
@@ -53,7 +53,7 @@ export class TournamentService {
        RETURNING id, name, bracket_size AS "bracketSize", entry_fee::text AS "entryFee",
                  prize_pool::text AS "prizePool", status, starts_at AS "startsAt",
                  created_at AS "createdAt"`,
-      [creatorId, name, bracketSize, entryFee, startDate],
+      [creatorId, validatedName, bracketSize, entryFee, startDate],
     );
 
     logger.info(`Tournament created: id=${t.id} by=${creatorId} size=${bracketSize} fee=${entryFee}`);
@@ -80,9 +80,13 @@ export class TournamentService {
 
     const { rows: [user] } = await pool.query('SELECT elo FROM users WHERE id=$1', [userId]);
     const fee = parseFloat(t.entryFee);
+    let feeDeducted = false;
+    if (fee > 0) {
+      await BalanceService.deductBalance(userId, t.entryFee);
+      feeDeducted = true;
+    }
 
-    // Everything in one transaction: capacity check + balance deduction + participant insert
-    // This eliminates the window where balance is deducted but join fails with no recovery.
+    // Capacity check + participant insert in one transaction.
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -95,22 +99,7 @@ export class TournamentService {
         [tournamentId],
       );
       if (locked.participant_count >= locked.bracket_size) {
-        await client.query('ROLLBACK');
         throw new AppError(400, 'Tournament is full', 'TOURNAMENT_FULL');
-      }
-
-      // Deduct entry fee inside the transaction — if anything below fails, this rolls back too
-      if (fee > 0) {
-        const { rowCount } = await client.query(
-          `UPDATE balances
-           SET available = available - $1::numeric, updated_at = NOW()
-           WHERE user_id = $2 AND available >= $1::numeric`,
-          [t.entryFee, userId],
-        );
-        if (!rowCount) {
-          await client.query('ROLLBACK');
-          throw new AppError(400, 'Insufficient balance', 'INSUFFICIENT_BALANCE');
-        }
       }
 
       // Insert participant
@@ -131,6 +120,9 @@ export class TournamentService {
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
+      if (feeDeducted) {
+        await BalanceService.creditBalance(userId, t.entryFee).catch(() => {});
+      }
       throw err;
     } finally {
       client.release();

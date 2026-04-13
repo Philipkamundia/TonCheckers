@@ -25,6 +25,9 @@ export interface GameState {
       loser:  { before: number; after: number; delta: number };
     };
   };
+  // C-03: Opponent disconnect grace period state
+  opponentDisconnected?: boolean;
+  disconnectGraceMs?:    number;
 }
 
 export function useGame(gameId: string | null, myPlayerNumber: 1 | 2 | null) {
@@ -40,6 +43,8 @@ export function useGame(gameId: string | null, myPlayerNumber: 1 | 2 | null) {
   const [selectedPiece, setSelectedPiece] = useState<{ row: number; col: number } | null>(null);
   const [invalidMove, setInvalidMove]     = useState<string | null>(null);
   const [drawOffer,   setDrawOffer]       = useState<string | null>(null); // username who offered draw
+  // C-03: Track opponent disconnect grace period for UI countdown
+  const [opponentDisconnected, setOpponentDisconnected] = useState(false);
 
   // Subscribe to game room on mount
   useEffect(() => {
@@ -105,6 +110,15 @@ export function useGame(gameId: string | null, myPlayerNumber: 1 | 2 | null) {
         setInvalidMove('Opponent declined the draw offer');
         setTimeout(() => setInvalidMove(null), 3_000);
       }),
+      // C-03: Opponent disconnected — grace period countdown
+      on<{ gameId: string; graceMs: number; message: string }>('game.opponent_disconnected', () => {
+        setOpponentDisconnected(true);
+        haptic.warning();
+      }),
+      // C-03: Opponent reconnected within grace period
+      on<{ gameId: string }>('game.opponent_reconnected', () => {
+        setOpponentDisconnected(false);
+      }),
     ];
     return () => unsubs.forEach(u => u());
   }, [on, haptic, myPlayerNumber]);
@@ -139,5 +153,5 @@ export function useGame(gameId: string | null, myPlayerNumber: 1 | 2 | null) {
     setDrawOffer(null);
   }, [gameId, emit]);
 
-  return { gameState, selectedPiece, setSelectedPiece, invalidMove, makeMove, resign, offerDraw, acceptDraw, declineDraw, drawOffer };
+  return { gameState, selectedPiece, setSelectedPiece, invalidMove, makeMove, resign, offerDraw, acceptDraw, declineDraw, drawOffer, opponentDisconnected };
 }

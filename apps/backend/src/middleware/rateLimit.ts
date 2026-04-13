@@ -4,17 +4,22 @@
  * H-01: Uses rate-limit-redis store so limits are shared across all Node
  * processes / pods. Without a shared store, each process keeps its own
  * counter and users can bypass limits by load-balancing across processes.
+ *
+ * rate-limit-redis v4 works with ioredis via a generic sendCommand wrapper.
  */
 import rateLimit from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import redis from '../config/redis.js';
 
-/** Helper: build a RedisStore keyed by a prefix */
-function makeRedisStore(prefix: string) {
+/** Build a RedisStore that uses the shared ioredis connection */
+function makeRedisStore(prefix: string): RedisStore {
   return new RedisStore({
-    // rate-limit-redis v4 uses sendCommand; ioredis exposes it via .call()
-    sendCommand: (...args: [string, ...string[]]) =>
-      (redis as unknown as { call: (...a: unknown[]) => Promise<unknown> }).call(...args) as Promise<number>,
+    // rate-limit-redis v4 generic sendCommand for ioredis:
+    // ioredis.call() executes arbitrary commands and returns Promise<unknown>
+    sendCommand: (command: string, ...args: string[]): Promise<number> =>
+      (redis as unknown as {
+        call(command: string, ...args: string[]): Promise<unknown>;
+      }).call(command, ...args) as Promise<number>,
     prefix,
   });
 }

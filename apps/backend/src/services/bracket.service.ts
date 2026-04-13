@@ -35,6 +35,17 @@ export class BracketService {
   ): { matches: BracketMatch[]; byePlayers: string[] } {
     const sorted = [...players].sort((a, b) => b.seedElo - a.seedElo);
     const n      = sorted.length;
+    if (n <= 1) {
+      const byePlayers = sorted.map(p => p.userId);
+      const matches = byePlayers.map((userId, idx) => ({
+        round: 1,
+        matchNumber: idx + 1,
+        player1Id: userId,
+        player2Id: null,
+        isBye: true,
+      }));
+      return { matches, byePlayers };
+    }
 
     // byeCount = how many top-seeded players skip R1.
     // Rules:

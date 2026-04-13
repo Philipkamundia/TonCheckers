@@ -8,7 +8,7 @@
 
 import {
   Board, Move, Player, Position, Square,
-  EMPTY, P1, P2, P1_KING, P2_KING,
+  EMPTY, P1, P2,
   cloneBoard, inBounds, isOwnPiece, isOpponentPiece, isKing,
 } from './board.js';
 

@@ -62,6 +62,12 @@ export function PvpLobby() {
         setError(reason);
         haptic.error();
       }),
+      // N-07: Server auto-dequeued user after max wait time, stake returned
+      on<{ reason: string }>('mm.timeout', ({ reason }) => {
+        setInQueue(false);
+        setError(reason ?? 'No match found — stake returned. Please try again.');
+        haptic.warning();
+      }),
     ];
     return () => unsubs.forEach(u => u());
   }, [on]);

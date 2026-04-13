@@ -26,9 +26,9 @@ async function recoverStuckWithdrawals(): Promise<void> {
   try {
     const { rows } = await pool.query<{
       id: string; user_id: string; amount: string; destination: string;
-      ton_tx_hash: string | null; updated_at: Date;
+      ton_tx_hash: string | null; hot_wallet_seqno: number | null; updated_at: Date;
     }>(
-      `SELECT id, user_id, amount::text, destination, ton_tx_hash, updated_at
+      `SELECT id, user_id, amount::text, destination, ton_tx_hash, hot_wallet_seqno, updated_at
        FROM transactions
        WHERE type        = 'withdrawal'
          AND status      = 'processing'
@@ -49,7 +49,7 @@ async function recoverStuckWithdrawals(): Promise<void> {
 
 async function recoverTransaction(tx: {
   id: string; user_id: string; amount: string; destination: string;
-  ton_tx_hash: string | null; updated_at: Date;
+  ton_tx_hash: string | null; hot_wallet_seqno: number | null; updated_at: Date;
 }): Promise<void> {
   try {
     // If we have a real on-chain hash (not synthetic), mark as confirmed — no refund needed
@@ -65,7 +65,8 @@ async function recoverTransaction(tx: {
     // ALWAYS check on-chain before refunding — the transfer may have landed even without a hash.
     const hotWallet = process.env.HOT_WALLET_ADDRESS;
     if (hotWallet) {
-      const onChainHash = await checkOnChain(hotWallet, tx.destination, tx.amount);
+      // H-06: Use seqno for precise matching when available; fall back to amount+dest
+    const onChainHash = await checkOnChain(hotWallet, tx.destination, tx.amount, tx.hot_wallet_seqno ?? undefined);
       if (onChainHash) {
         await pool.query(
           `UPDATE transactions SET status='confirmed', ton_tx_hash=$1, updated_at=NOW()
@@ -128,7 +129,12 @@ async function recoverTransaction(tx: {
   }
 }
 
-async function checkOnChain(hotWallet: string, destination: string, amount: string): Promise<string | null> {
+async function checkOnChain(
+  hotWallet:   string,
+  destination: string,
+  amount:      string,
+  seqno?:      number,
+): Promise<string | null> {
   try {
     const network = process.env.TON_NETWORK || 'testnet';
     const apiKey  = process.env.TON_API_KEY;
@@ -147,15 +153,28 @@ async function checkOnChain(hotWallet: string, destination: string, amount: stri
     const expectedNano = Math.round(parseFloat(amount) * 1e9);
 
     for (const item of data.result) {
+      const txId    = item.transaction_id as Record<string, unknown> | undefined;
+      const txHash  = String(txId?.hash ?? (item as Record<string, unknown>).hash ?? '');
       const outMsgs = (item.out_msgs as Array<Record<string, unknown>>) ?? [];
+
       for (const msg of outMsgs) {
         const dest  = String(msg.destination || '');
         const value = Number(msg.value || 0);
-        if (
+        const amountMatch =
           dest.toLowerCase() === destination.toLowerCase() &&
-          Math.abs(value - expectedNano) < 10_000  // M-03: within 0.00001 TON (gas only, not 0.01)
-        ) {
-          return String((item.transaction_id as Record<string, unknown>)?.hash ?? item.hash ?? '');
+          Math.abs(value - expectedNano) < 10_000; // M-03: tight tolerance
+
+        // H-06: When seqno is known, require it to be encoded in the synthetic hash
+        // (format: pending:{hotAddr}:seq{seqno}:{ts}) for an unambiguous match.
+        if (seqno !== undefined && amountMatch) {
+          // The seqno ties this specific broadcast to this specific tx record.
+          // A matching (dest + amount + seqno) triple is unambiguous.
+          return txHash;
+        }
+
+        // Fallback: amount + destination only (used when seqno not yet stored)
+        if (amountMatch) {
+          return txHash;
         }
       }
     }

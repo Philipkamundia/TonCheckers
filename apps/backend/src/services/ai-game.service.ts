@@ -87,10 +87,14 @@ export class AiGameService {
 
     const afterHuman = applyMoveWithPromotion(state.board, move);
     const hash1      = hashBoardState(afterHuman, 2);
-    const state1     = nextGameState(state, move, hash1, afterHuman);
+    // N-05: Track consecutive moves without capture (50-move draw rule)
+    const humanMovesSinceCapture = move.captures.length > 0
+      ? 0
+      : (state.movesSinceCapture ?? 0) + 1;
+    const state1 = { ...nextGameState(state, move, hash1, afterHuman), movesSinceCapture: humanMovesSinceCapture };
 
     // Check if human won
-    const afterHumanResult = checkWinCondition(afterHuman, 2, state1.boardHashHistory);
+    const afterHumanResult = checkWinCondition(afterHuman, 2, state1.boardHashHistory, state1.movesSinceCapture ?? 0);
     if (afterHumanResult.status !== 'ongoing') {
       await pool.query(
         `UPDATE games SET status='completed', board_state=$1, ended_at=NOW(), updated_at=NOW() WHERE id=$2`,
@@ -102,7 +106,7 @@ export class AiGameService {
         gameOver: {
           result: afterHumanResult.status,
           winner: afterHumanResult.status === 'win' ? afterHumanResult.winner : undefined,
-          reason: afterHumanResult.status === 'win' ? afterHumanResult.reason : 'draw',
+          reason: afterHumanResult.status === 'win' ? afterHumanResult.reason : (afterHumanResult.status === 'draw' ? afterHumanResult.reason : 'draw'),
         },
       };
     }
@@ -140,7 +144,11 @@ export class AiGameService {
 
     const afterAi  = applyMoveWithPromotion(state1.board, aiMoveResult);
     const hash2    = hashBoardState(afterAi, 1);
-    const state2   = nextGameState(state1, aiMoveResult, hash2, afterAi);
+    // N-05: AI move capture tracking
+    const aiMovesSinceCapture = aiMoveResult.captures.length > 0
+      ? 0
+      : (state1.movesSinceCapture ?? 0) + 1;
+    const state2 = { ...nextGameState(state1, aiMoveResult, hash2, afterAi), movesSinceCapture: aiMovesSinceCapture };
 
     // Persist — include prevState snapshot for undo support
     const state2WithPrev = { ...state2, prevState: state };
@@ -151,7 +159,7 @@ export class AiGameService {
     await GameTimerService.startTimer(gameId, 1);
 
     // Check if AI won
-    const afterAiResult = checkWinCondition(afterAi, 1, state2.boardHashHistory);
+    const afterAiResult = checkWinCondition(afterAi, 1, state2.boardHashHistory, state2.movesSinceCapture ?? 0);
     if (afterAiResult.status !== 'ongoing') {
       await pool.query(
         `UPDATE games SET status='completed', ended_at=NOW(), updated_at=NOW() WHERE id=$1`, [gameId],
@@ -163,7 +171,7 @@ export class AiGameService {
         gameOver: {
           result: afterAiResult.status,
           winner: afterAiResult.status === 'win' ? afterAiResult.winner : undefined,
-          reason: afterAiResult.status === 'win' ? afterAiResult.reason : 'draw',
+          reason: afterAiResult.status === 'win' ? afterAiResult.reason : (afterAiResult.status === 'draw' ? afterAiResult.reason : 'draw'),
         },
       };
     }

@@ -89,7 +89,8 @@ export class WithdrawalService {
 
     if (!requiresReview) {
       // Atomically increment — if the result exceeds the limit, roll back immediately
-      const newDailyTotal = await redis.incrbyfloat(dailyKey, amountNum);
+      const newDailyTotalRaw = await redis.incrbyfloat(dailyKey, amountNum);
+      const newDailyTotal = Number(newDailyTotalRaw);
       await redis.expire(dailyKey, secsUntilMidnightForLimit);
       if (newDailyTotal > MAX_DAILY_TON) {
         // Roll back the increment
@@ -190,15 +191,14 @@ export class WithdrawalService {
       logger.info(`Withdrawal sent: user=${userId} amount=${amount} TON hash=${txHash}`);
     } catch (err) {
       // Always release the hot-wallet lock on error so the next withdrawal can proceed
-      try { const r = (await import('../config/redis.js')).default; await r.del('withdrawal:hot_wallet_lock'); } catch {}
+      try { await redis.del('withdrawal:hot_wallet_lock'); } catch {}
       await pool.query(
         `UPDATE transactions SET status='failed', updated_at=NOW() WHERE id=$1`,
         [transactionId],
       );
       // M-02: Set cooldown even on failure to prevent rapid-fire retry loops
       if (cooldownKey) {
-        const r = (await import('../config/redis.js')).default;
-        await r.set(cooldownKey, '1', 'EX', COOLDOWN_SECS).catch(() => {});
+        await redis.set(cooldownKey, '1', 'EX', COOLDOWN_SECS).catch(() => {});
       }
       // Refund on failure
       await BalanceService.creditBalance(userId, amount).catch(refundErr => {
@@ -245,8 +245,7 @@ export class WithdrawalService {
     // H-05: Acquire hot-wallet serialization lock to prevent two concurrent withdrawals
     // from reading the same seqno and broadcasting conflicting transactions.
     // 30-second TTL is enough for seqno fetch + broadcast; released explicitly after send.
-    const redis = (await import('../config/redis.js')).default;
-    const lockAcquired = await redis.set('withdrawal:hot_wallet_lock', transactionId ?? 'lock', 'PX', 30_000, 'NX');
+        const lockAcquired = await redis.set('withdrawal:hot_wallet_lock', transactionId ?? 'lock', 'PX', 30_000, 'NX');
     if (!lockAcquired) {
       throw new Error('Hot wallet busy — another withdrawal is in progress. Retry in a moment.');
     }
@@ -257,6 +256,15 @@ export class WithdrawalService {
     } catch (err) {
       const msg = (err as Error).message;
       throw new Error(`TON API error getting seqno (network=${network} endpoint=${endpoint}): ${msg}`);
+    }
+
+    // H-06: Persist the seqno immediately so the recovery job can use it for precise
+    // on-chain matching rather than the ambiguous amount+destination heuristic.
+    if (transactionId) {
+      await pool.query(
+        `UPDATE transactions SET hot_wallet_seqno=$1, updated_at=NOW() WHERE id=$2`,
+        [seqno, transactionId],
+      );
     }
 
     const { Address, toNano, SendMode } = await import('@ton/core');

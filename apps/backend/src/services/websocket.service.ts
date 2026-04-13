@@ -1,5 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { AuthService } from './auth.service.js';
+import redis from '../config/redis.js';
 import { registerGameHandlers } from '../websocket/handlers/gameHandler.js';
 import { registerUserHandlers } from '../websocket/handlers/userHandler.js';
 import { registerAiGameHandlers } from '../websocket/handlers/aiGameHandler.js';
@@ -48,33 +49,35 @@ export class WebSocketService {
       // H-07: Per-USER rate limiting backed by Redis so limits persist across
       // reconnects and hold across all server processes.
       // Key format: ws:rl:{userId}:{eventType}:{windowSecond}
-      const redis_ = (await import('../config/redis.js')).default;
-
-      socket.use(async ([event], next) => {
+      // socket.use does not support async callbacks (returns void, not Promise).
+      // We use fire-and-forget promise chaining and call next() synchronously
+      // for the non-rate-limited path, dropping silently on limit exceeded.
+      socket.use(([event], next) => {
         const windowSec = Math.floor(Date.now() / RATE_LIMIT_WINDOW_MS);
 
-        // General event limit
         const generalKey = `ws:rl:${userId}:general:${windowSec}`;
-        const generalCount = await redis_.incr(generalKey);
-        if (generalCount === 1) await redis_.expire(generalKey, 2);
-        if (generalCount > RATE_LIMIT_MAX) {
-          logger.warn(`WS rate limit exceeded: user=${userId} event=${event}`);
-          return; // drop silently
-        }
-
-        // Stricter limit for move events
-        if (MOVE_EVENTS.has(event)) {
-          const moveKey   = `ws:rl:${userId}:moves:${windowSec}`;
-          const moveCount = await redis_.incr(moveKey);
-          if (moveCount === 1) await redis_.expire(moveKey, 2);
-          if (moveCount > MOVE_LIMIT_MAX) {
-            logger.warn(`WS move rate limit exceeded: user=${userId}`);
-            socket.emit('game.move_invalid', { reason: 'Too many moves — slow down' });
-            return;
+        redis.incr(generalKey).then((generalCount) => {
+          if (generalCount === 1) redis.expire(generalKey, 2);
+          if (generalCount > RATE_LIMIT_MAX) {
+            logger.warn(`WS rate limit exceeded: user=${userId} event=${event}`);
+            return; // drop — do not call next()
           }
-        }
 
-        next();
+          if (MOVE_EVENTS.has(event)) {
+            const moveKey = `ws:rl:${userId}:moves:${windowSec}`;
+            redis.incr(moveKey).then((moveCount) => {
+              if (moveCount === 1) redis.expire(moveKey, 2);
+              if (moveCount > MOVE_LIMIT_MAX) {
+                logger.warn(`WS move rate limit exceeded: user=${userId}`);
+                socket.emit('game.move_invalid', { reason: 'Too many moves — slow down' });
+                return;
+              }
+              next();
+            }).catch(() => next()); // on Redis error, allow through
+          } else {
+            next();
+          }
+        }).catch(() => next()); // on Redis error, allow through
       });
 
       registerUserHandlers(socket);

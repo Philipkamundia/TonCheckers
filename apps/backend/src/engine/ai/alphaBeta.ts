@@ -66,7 +66,9 @@ function alphaBeta(
   beta:     number,
   history:  string[],
 ): number {
-  const result = checkWinCondition(board, player, history);
+  // movesSinceCapture is not tracked across AI search tree nodes (depth < 50);
+  // passing 0 is safe since tree depth never approaches the 50-move limit.
+  const result = checkWinCondition(board, player, history, 0);
   if (result.status === 'win')  return result.winner === aiPlayer ? 10000 : -10000;
   if (result.status === 'draw') return 0;
   if (depth === 0)              return evaluateEnhanced(board, aiPlayer);

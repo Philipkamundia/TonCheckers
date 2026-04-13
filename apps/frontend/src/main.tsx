@@ -12,8 +12,8 @@ import { App } from './App';
 // hard-coded in source. Set VITE_TELEGRAM_ANALYTICS_TOKEN and
 // VITE_TELEGRAM_ANALYTICS_APP_NAME in your deployment environment.
 // Obtain a token via @DataChief_bot on Telegram (TON Builders portal).
-const analyticsToken   = import.meta.env.VITE_TELEGRAM_ANALYTICS_TOKEN   as string | undefined;
-const analyticsAppName = import.meta.env.VITE_TELEGRAM_ANALYTICS_APP_NAME as string | undefined;
+const analyticsToken   = import.meta.env.VITE_TELEGRAM_ANALYTICS_TOKEN;
+const analyticsAppName = import.meta.env.VITE_TELEGRAM_ANALYTICS_APP_NAME;
 
 if (analyticsToken && analyticsAppName) {
   telegramAnalytics.init({

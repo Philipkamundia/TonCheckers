@@ -18,6 +18,8 @@ import {
   hashBoardState, checkWinCondition, type Player,
 } from '../../engine/index.js';
 import { logger } from '../../utils/logger.js';
+import redis from '../../config/redis.js';
+import { assertGameState } from '../../validation/gameState.js';
 
 // C-03: In-memory map of pending disconnect-forfeit timers.
 // Key: `${gameId}:${userId}` — cleared on reconnect or game end.
@@ -100,6 +102,15 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
         return socket.emit('game.move_invalid', { gameId, reason: 'Game not active' });
       }
 
+      // M-07: Validate board state structure before touching it — guards against
+      // DB corruption producing a board that would crash the engine mid-game.
+      try {
+        assertGameState(game.boardState);
+      } catch {
+        logger.error(`game.move: corrupted board state for game=${gameId}`);
+        return socket.emit('game.move_invalid', { gameId, reason: 'Game state error — please contact support' });
+      }
+
       // Validate coordinate bounds before any board access
       const validCoord = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 7;
       if (!validCoord(from?.row) || !validCoord(from?.col) || !validCoord(to?.row) || !validCoord(to?.col)) {
@@ -129,12 +140,13 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
 
       // N-05: Track consecutive moves without capture for 50-move draw rule.
       // A capture resets the counter; a simple move increments it.
+      // movesSinceCapture is stored in GameState (optional field) and persisted via JSONB.
       const movesSinceCapture = move.captures.length > 0
         ? 0
-        : ((game.boardState as unknown as { movesSinceCapture?: number }).movesSinceCapture ?? 0) + 1;
+        : (game.boardState.movesSinceCapture ?? 0) + 1;
 
-      // Embed movesSinceCapture in the state so it survives board state reads
-      (newState as unknown as { movesSinceCapture: number }).movesSinceCapture = movesSinceCapture;
+      // Store in the new state so it's persisted to DB with the board
+      newState.movesSinceCapture = movesSinceCapture;
 
       await GameService.updateBoardState(gameId, newState, nextPlayer, newState.moveCount);
       await GameTimerService.startTimer(gameId, nextPlayer);
@@ -253,7 +265,6 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
       const opponentId = game.player1Id === userId ? game.player2Id! : game.player1Id;
 
       // C-08: Record who made the offer so accept_draw can validate the recipient
-      const { default: redis } = await import('../../config/redis.js');
       await redis.set(`draw:offer:${gameId}`, userId, 'EX', 60);
 
       io.to(`user:${opponentId}`).emit('game.draw_offer', {
@@ -274,7 +285,6 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
 
       // C-08: Verify there is a pending draw offer AND the accepting player is
       // not the same player who sent it (prevents unilateral self-accept exploit).
-      const { default: redis } = await import('../../config/redis.js');
       const offerKey  = `draw:offer:${gameId}`;
       const offeredBy = await redis.get(offerKey);
       if (!offeredBy) {
@@ -310,7 +320,6 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
 
       const opponentId = game.player1Id === userId ? game.player2Id! : game.player1Id;
       // M-10: Clean up pending offer key so the opponent cannot later "accept" a declined offer
-      const { default: redis } = await import('../../config/redis.js');
       await redis.del(`draw:offer:${gameId}`);
       io.to(`user:${opponentId}`).emit('game.draw_offer_declined', { gameId });
       logger.info(`Draw declined: game=${gameId} by=${userId}`);

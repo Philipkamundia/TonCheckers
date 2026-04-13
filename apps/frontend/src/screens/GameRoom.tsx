@@ -34,7 +34,7 @@ export function GameRoom() {
 
   const {
     gameState, selectedPiece, setSelectedPiece, invalidMove, makeMove, resign,
-    offerDraw, acceptDraw, declineDraw, drawOffer,
+    offerDraw, acceptDraw, declineDraw, drawOffer, opponentDisconnected,
   } = useGame(gameId ?? null, myPlayerNum);
 
   // Listen for tournament lobby_ready while in a PvP game
@@ -145,6 +145,12 @@ export function GameRoom() {
         {gameState.board && renderBoard(gameState.board, selectedPiece, myPlayerNum, handleCellPress, movablePieces, validDests)}
       </div>
 
+      {/* C-03: Opponent disconnect grace period banner */}
+      {opponentDisconnected && (
+        <p style={{ ...styles.invalidMove, color: '#f59e0b', fontWeight: 600 }}>
+          ⚠️ Opponent disconnected — waiting 30s before forfeit…
+        </p>
+      )}
       {invalidMove && <p style={styles.invalidMove}>{invalidMove}</p>}
 
       {/* Tournament interrupt overlay */}
