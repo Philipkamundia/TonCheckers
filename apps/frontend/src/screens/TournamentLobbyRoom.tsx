@@ -10,7 +10,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useWebSocket, onReconnect } from '../hooks/useWebSocket';
 import { useStore } from '../store';
 
 export function TournamentLobbyRoom() {
@@ -28,7 +28,8 @@ export function TournamentLobbyRoom() {
   // Signal presence as soon as we land here, countdown from server expiresAt
   useEffect(() => {
     if (!gameId) return;
-    emit('tournament.lobby_join', { gameId });
+    const send = () => emit('tournament.lobby_join', { gameId });
+    send();
 
     const expiresAt = lobby?.expiresAt ?? (Date.now() + 10_000);
     const initialRemaining = Math.max(1, Math.ceil((expiresAt - Date.now()) / 1000));
@@ -40,8 +41,12 @@ export function TournamentLobbyRoom() {
       if (remaining <= 0) clearInterval(timer);
     }, 500); // tick every 500ms for accuracy
 
-    return () => clearInterval(timer);
-  }, [gameId]);
+    const offReconnect = onReconnect(send);
+    return () => {
+      clearInterval(timer);
+      offReconnect();
+    };
+  }, [gameId, lobby?.expiresAt, emit]);
 
   useEffect(() => {
     const unsubs = [
@@ -75,7 +80,7 @@ export function TournamentLobbyRoom() {
       }),
     ];
     return () => unsubs.forEach(u => u());
-  }, [on, gameId]);
+  }, [on, gameId, haptic, navigate, setActiveGame, setActiveTournamentId, setPendingTournamentLobby]);
 
   if (status === 'forfeit_win') {
     return (

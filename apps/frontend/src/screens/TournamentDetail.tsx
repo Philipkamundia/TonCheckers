@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
-import { useWebSocket } from '../hooks/useWebSocket';
+import { useWebSocket, onReconnect } from '../hooks/useWebSocket';
 import { useStore } from '../store';
 import { tournamentApi } from '../services/api';
 import type { TournamentLobbyPayload } from '../store';
@@ -35,7 +35,12 @@ export function TournamentDetail() {
   const { id } = useParams<{ id: string }>();
   const { showBackButton, showMainButton, hideMainButton, setMainButtonLoading, haptic } = useTelegram();
   const { on, emit } = useWebSocket();
-  const { user, setPendingTournamentLobby } = useStore();
+  const {
+    user,
+    setPendingTournamentLobby,
+    addParticipatingTournament,
+    removeParticipatingTournament,
+  } = useStore();
   const navigate = useNavigate();
 
   const [tournament,       setTournament]       = useState<TournamentData | null>(null);
@@ -53,17 +58,34 @@ export function TournamentDetail() {
     isWinner: boolean; winnerUsername: string; winnerPayout: string; prizePool: string;
   } | null>(null);
 
-  const refresh = () =>
-    tournamentApi.get(id!).then(r => setTournament(r.data.tournament)).catch(() => null);
+  const refresh = async (): Promise<TournamentData | null> => {
+    try {
+      const r = await tournamentApi.get(id!);
+      const t = r.data.tournament as TournamentData;
+      setTournament(t);
+      return t;
+    } catch {
+      return null;
+    }
+  };
 
   useEffect(() => { return showBackButton(() => navigate('/tournaments')); }, []);
   useEffect(() => { refresh(); }, [id]);
 
-  // Signal bracket presence on mount
+  // Signal bracket presence on mount + after every reconnect (same screen)
   useEffect(() => {
     if (!id) return;
-    emit('tournament.bracket_join', { tournamentId: id });
-  }, [id]);
+    const send = () => emit('tournament.bracket_join', { tournamentId: id });
+    send();
+    return onReconnect(send);
+  }, [id, emit]);
+
+  // Track participation for mid-game tournament prompts (GameRoom)
+  useEffect(() => {
+    if (!tournament || !user?.id) return;
+    const me = tournament.participants.find(p => p.userId === user.id);
+    if (me && !me.isEliminated) addParticipatingTournament(tournament.id);
+  }, [tournament, user?.id, addParticipatingTournament]);
 
   // Detect presence window — set countdown from server expiresAt
   useEffect(() => {
@@ -79,29 +101,32 @@ export function TournamentDetail() {
     }
   }, [tournament?.status, tournament?.currentRound]);
 
-  // Countdown ticker — drives presence (server expiresAt), match_preview (10s), complete_preview (10s)
+  // Presence countdown — server deadline when available, else client fallback
   useEffect(() => {
-    if (!['presence', 'match_preview', 'complete_preview'].includes(phase)) return;
-    if (phaseCountdown <= 0) return;
-
-    const expiresAt = phase === 'presence' ? bracketExpiresAt : null;
-
-    const timer = setInterval(() => {
-      if (expiresAt) {
-        // Server-driven: calculate from actual deadline
-        const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+    if (phase !== 'presence') return;
+    if (bracketExpiresAt) {
+      const tick = () => {
+        const remaining = Math.max(0, Math.ceil((bracketExpiresAt - Date.now()) / 1000));
         setPhaseCountdown(remaining);
-        if (remaining <= 0) clearInterval(timer);
-      } else {
-        // Client-driven for fixed phases (match_preview, complete_preview)
-        setPhaseCountdown(prev => {
-          if (prev <= 1) { clearInterval(timer); return 0; }
-          return prev - 1;
-        });
-      }
-    }, 500);
+      };
+      tick();
+      const timer = setInterval(tick, 500);
+      return () => clearInterval(timer);
+    }
+    const timer = setInterval(() => {
+      setPhaseCountdown(prev => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
     return () => clearInterval(timer);
   }, [phase, bracketExpiresAt]);
+
+  // Match / complete preview — fixed 1s ticks (phase transition resets countdown in handlers)
+  useEffect(() => {
+    if (phase !== 'match_preview' && phase !== 'complete_preview') return;
+    const timer = setInterval(() => {
+      setPhaseCountdown(prev => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [phase]);
 
   // When match_preview countdown hits 0 → go to lobby
   useEffect(() => {
@@ -111,7 +136,7 @@ export function TournamentDetail() {
     setPendingTournamentLobby(lobby);
     pendingLobbyRef.current = null;
     navigate(`/tournament-lobby/${lobby.gameId}`);
-  }, [phase, phaseCountdown]);
+  }, [phase, phaseCountdown, navigate, setPendingTournamentLobby, id]);
 
   // When complete_preview countdown hits 0 → go to complete screen
   useEffect(() => {
@@ -119,11 +144,12 @@ export function TournamentDetail() {
     const data = pendingCompleteRef.current;
     if (!data) return;
     setPhase('done');
+    if (id) removeParticipatingTournament(id);
     navigate(`/tournaments/${id}/complete`, {
       replace: true,
       state: { tournamentName: tournament?.name ?? '', ...data },
     });
-  }, [phase, phaseCountdown]);
+  }, [phase, phaseCountdown, navigate, id, tournament?.name, removeParticipatingTournament]);
 
   // Live WS events
   useEffect(() => {
@@ -157,16 +183,16 @@ export function TournamentDetail() {
 
       on<{ tournamentId: string; winnerId: string; winnerPayout: string }>('tournament.completed', (data) => {
         if (data.tournamentId !== id) return;
-        refresh().then((t: any) => {
-          const updated: TournamentData = t?.data?.tournament ?? tournament!;
+        void refresh().then((updated) => {
+          if (!updated) return;
           const myId = user?.id;
           const isWinner = data.winnerId === myId;
-          const winnerParticipant = updated?.participants?.find((p: Participant) => p.userId === data.winnerId);
+          const winnerParticipant = updated.participants.find((p: Participant) => p.userId === data.winnerId);
           pendingCompleteRef.current = {
             isWinner,
             winnerUsername: winnerParticipant?.username ?? '?',
             winnerPayout:   data.winnerPayout,
-            prizePool:      updated?.prizePool ?? '0',
+            prizePool:      updated.prizePool ?? '0',
           };
           setPhase('complete_preview');
           setPhaseCountdown(10);
@@ -175,6 +201,7 @@ export function TournamentDetail() {
 
       on<{ tournamentId: string; reason: string }>('tournament.cancelled', (data) => {
         if (data.tournamentId !== id) return;
+        if (id) removeParticipatingTournament(id);
         setError(`Tournament cancelled: ${data.reason}`);
         setTournament(prev => prev ? { ...prev, status: 'cancelled' } : prev);
         hideMainButton();
@@ -186,7 +213,7 @@ export function TournamentDetail() {
       }),
     ];
     return () => unsubs.forEach(u => u());
-  }, [on, id]);
+  }, [on, id, user?.id, removeParticipatingTournament]);
 
   // Join button
   useEffect(() => {
@@ -199,8 +226,9 @@ export function TournamentDetail() {
     try {
       await tournamentApi.join(id!);
       setJoined(true);
+      addParticipatingTournament(id!);
       haptic.success();
-      refresh();
+      await refresh();
     } catch (e: unknown) {
       setError((e as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'Failed to join');
       haptic.error();

@@ -17,6 +17,33 @@ let globalSocket: Socket | null = null;
 type AnyHandler = (data: any) => void;
 const globalListeners = new Map<string, Set<AnyHandler>>();
 
+/** Emits replayed after reconnect — bracket / lobby presence must not be lost */
+const EMIT_QUEUE_EVENTS = new Set(['tournament.bracket_join', 'tournament.lobby_join']);
+type QueuedEmit = { event: string; data?: unknown };
+const emitQueue: QueuedEmit[] = [];
+
+const reconnectCallbacks = new Set<() => void>();
+
+function flushEmitQueue(): void {
+  if (!globalSocket?.connected) return;
+  while (emitQueue.length > 0) {
+    const item = emitQueue.shift()!;
+    globalSocket.emit(item.event, item.data);
+  }
+}
+
+/** Components can register one-shot refresh of presence after reconnect */
+export function onReconnect(cb: () => void): () => void {
+  reconnectCallbacks.add(cb);
+  return () => { reconnectCallbacks.delete(cb); };
+}
+
+function notifyReconnect(): void {
+  reconnectCallbacks.forEach(cb => {
+    try { cb(); } catch (e) { console.error('[ws] reconnect callback', e); }
+  });
+}
+
 function getOrCreateSocket(): Socket | null {
   const token = localStorage.getItem('access_token');
   if (!token) return null;
@@ -34,10 +61,10 @@ function getOrCreateSocket(): Socket | null {
 
   globalSocket.on('connect', () => {
     console.log('[ws] connected', globalSocket?.id);
-    // Re-attach all global listeners after reconnect
-    globalListeners.forEach((handlers, event) => {
-      handlers.forEach(h => globalSocket?.on(event, h));
-    });
+    // Do NOT re-attach globalListeners here — handlers are already bound to this
+    // socket instance; duplicate registration on every reconnect would multiply fires.
+    flushEmitQueue();
+    notifyReconnect();
   });
   globalSocket.on('disconnect',    (r) => console.log('[ws] disconnected', r));
   globalSocket.on('connect_error', (e) => console.error('[ws] connect_error', e.message));
@@ -89,9 +116,15 @@ export function useWebSocket() {
 
   const emit = useCallback((event: string, data?: unknown) => {
     if (!globalSocket?.connected) {
-      console.warn('[ws] emit called but socket not connected:', event);
+      if (EMIT_QUEUE_EVENTS.has(event)) {
+        emitQueue.push({ event, data });
+        console.warn('[ws] emit queued until reconnect:', event);
+      } else {
+        console.warn('[ws] emit called but socket not connected:', event);
+      }
+      return;
     }
-    globalSocket?.emit(event, data);
+    globalSocket.emit(event, data);
   }, []);
 
   const subscribe = useCallback((gameId: string) => {

@@ -25,7 +25,13 @@ const PIECE_COLORS: Record<number, string> = {
 export function GameRoom() {
   const { gameId } = useParams<{ gameId: string }>();
   const { showBackButton, haptic } = useTelegram();
-  const { myPlayerNum, activeTournamentId, setPendingTournamentLobby, setActiveTournamentId } = useStore();
+  const {
+    myPlayerNum,
+    activeTournamentId,
+    participatingTournamentIds,
+    setPendingTournamentLobby,
+    setActiveTournamentId,
+  } = useStore();
   const { on } = useWebSocket();
   const navigate = useNavigate();
 
@@ -40,13 +46,14 @@ export function GameRoom() {
   // Listen for tournament lobby_ready while in a PvP game
   useEffect(() => {
     return on<TournamentLobbyPayload>('tournament.lobby_ready', (data) => {
-      // Only prompt if we're in an active non-tournament game
-      if (!activeTournamentId) {
+      // Only prompt if we're in an active non-tournament game and registered
+      // in this tournament.
+      if (!activeTournamentId && participatingTournamentIds.includes(data.tournamentId)) {
         haptic.warning();
         setTournamentPrompt(data);
       }
     });
-  }, [on, activeTournamentId]);
+  }, [on, activeTournamentId, participatingTournamentIds, haptic]);
 
   // Compute legal moves for highlighting — same engine as AI game
   const legalMoves = useMemo(() => {

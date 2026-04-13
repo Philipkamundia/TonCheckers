@@ -48,6 +48,7 @@ function AppRoutes() {
   const postAuthPath = '/';
 
   const [tournamentPrompts, setTournamentPrompts] = useState<StartingPayload[]>([]);
+  const [nowMs, setNowMs] = useState(Date.now());
 
   // Subscribe this component instance to the global starting events
   useEffect(() => {
@@ -59,6 +60,12 @@ function AppRoutes() {
     };
     _startingHandlers.push(handler);
     return () => { _startingHandlers = _startingHandlers.filter(h => h !== handler); };
+  }, []);
+
+  // Keep countdown labels in prompts fresh.
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, []);
 
   function acceptTournament(tournamentId: string) {
@@ -85,7 +92,7 @@ function AppRoutes() {
             🏆 {p.tournamentName}
           </p>
           <p style={{ color: 'var(--tg-theme-hint-color)', fontSize: 13, margin: '0 0 12px' }}>
-            Tournament is starting — join the bracket ({Math.max(0, Math.ceil((p.expiresAt - Date.now()) / 1000))}s remaining)
+            Tournament is starting — join the bracket ({Math.max(0, Math.ceil((p.expiresAt - nowMs) / 1000))}s remaining)
           </p>
           <div style={{ display: 'flex', gap: 10 }}>
             <button onClick={() => acceptTournament(p.tournamentId)} style={{

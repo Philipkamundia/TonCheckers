@@ -24,6 +24,10 @@ export function TournamentComplete() {
   const state = location.state as CompleteState | null;
 
   useEffect(() => {
+    if (!state) navigate('/tournaments', { replace: true });
+  }, [state, navigate]);
+
+  useEffect(() => {
     balanceApi.get().then(r => setBalance(r.data.balance)).catch(() => null);
     if (state?.isWinner) haptic.success();
   }, []);
@@ -32,10 +36,7 @@ export function TournamentComplete() {
     return showMainButton('Back to Tournaments', () => navigate('/tournaments', { replace: true }), { color: '#2AABEE' });
   }, []);
 
-  if (!state) {
-    navigate('/tournaments', { replace: true });
-    return null;
-  }
+  if (!state) return null;
 
   return (
     <div style={styles.container}>

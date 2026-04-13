@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { authApi, balanceApi } from '../services/api';
+import { updateSocketToken } from '../hooks/useWebSocket';
 
 interface User {
   id:            string;
@@ -39,6 +40,8 @@ interface AppStore {
   // Tournament state
   pendingTournamentLobby: TournamentLobbyPayload | null;
   activeTournamentId:    string | null;
+  /** Tournaments the user is registered in (for gating mid-game lobby_ready prompts) */
+  participatingTournamentIds: string[];
   hydrated:              boolean;
 
   setUser:                   (user: User | null)    => void;
@@ -48,6 +51,8 @@ interface AppStore {
   setPendingLobby:           (lobby: AppStore['pendingLobby']) => void;
   setPendingTournamentLobby: (lobby: TournamentLobbyPayload | null) => void;
   setActiveTournamentId:     (id: string | null) => void;
+  addParticipatingTournament:    (id: string) => void;
+  removeParticipatingTournament: (id: string) => void;
   logout:                    () => void;
   /** Rehydrate user + balance from API on app load when a token exists in localStorage */
   hydrate:                   () => Promise<void>;
@@ -62,6 +67,7 @@ export const useStore = create<AppStore>((set, get) => ({
   pendingLobby:           null,
   pendingTournamentLobby: null,
   activeTournamentId:     null,
+  participatingTournamentIds: [],
   hydrated:               false,
 
   setUser:    (user)           => set({ user }),
@@ -74,8 +80,17 @@ export const useStore = create<AppStore>((set, get) => ({
     // Mini App sandbox limits third-party script injection vectors.
     localStorage.setItem('access_token',  access);
     localStorage.setItem('refresh_token', refresh);
+    updateSocketToken(access);
     set({ accessToken: access });
   },
+  addParticipatingTournament: (id) => set(s => ({
+    participatingTournamentIds: s.participatingTournamentIds.includes(id)
+      ? s.participatingTournamentIds
+      : [...s.participatingTournamentIds, id],
+  })),
+  removeParticipatingTournament: (id) => set(s => ({
+    participatingTournamentIds: s.participatingTournamentIds.filter(x => x !== id),
+  })),
   setActiveGame:             (gameId, playerNum) => set({ activeGameId: gameId, myPlayerNum: playerNum }),
   setPendingLobby:           (lobby)   => set({ pendingLobby: lobby }),
   setPendingTournamentLobby: (lobby)   => set({ pendingTournamentLobby: lobby }),
@@ -83,7 +98,10 @@ export const useStore = create<AppStore>((set, get) => ({
   logout: () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
-    set({ user: null, balance: null, accessToken: null, activeGameId: null, myPlayerNum: null, pendingTournamentLobby: null, activeTournamentId: null });
+    set({
+      user: null, balance: null, accessToken: null, activeGameId: null, myPlayerNum: null,
+      pendingTournamentLobby: null, activeTournamentId: null, participatingTournamentIds: [],
+    });
   },
   hydrate: async () => {
     if (!get().accessToken) { set({ hydrated: true }); return; }
