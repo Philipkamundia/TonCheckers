@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { useStore } from './store';
 import { WalletGate }             from './screens/WalletGate';
@@ -15,12 +15,14 @@ import { TournamentDetail }       from './screens/TournamentDetail';
 import { TournamentCreate }       from './screens/TournamentCreate';
 import { TournamentLobbyRoom }    from './screens/TournamentLobbyRoom';
 import { TournamentComplete }     from './screens/TournamentComplete';
+import { TournamentPostRound }      from './screens/TournamentPostRound';
 import { Leaderboard }            from './screens/Leaderboard';
 import { Deposit }                from './screens/Deposit';
 import { Withdraw }               from './screens/Withdraw';
 import { Profile }                from './screens/Profile';
 import { AdminDashboard }         from './screens/AdminDashboard';
 import { onGlobal }  from './hooks/useWebSocket';
+import { debugIngest } from './utils/debugIngest';
 
 const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://toncheckers.pages.dev'}/tonconnect-manifest.json`;
 
@@ -45,10 +47,17 @@ onGlobal<StartingPayload>('tournament.starting', (data) => {
 function AppRoutes() {
   const { accessToken, user } = useStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const postAuthPath = '/';
 
   const [tournamentPrompts, setTournamentPrompts] = useState<StartingPayload[]>([]);
   const [nowMs, setNowMs] = useState(Date.now());
+
+  // #region agent log
+  useEffect(() => {
+    debugIngest({ location: 'App.tsx:AppRoutes', message: 'pathname_changed', data: { pathname: location.pathname, search: location.search }, hypothesisId: 'H1', runId: 'post-fix' });
+  }, [location.pathname, location.search]);
+  // #endregion
 
   // Subscribe this component instance to the global starting events
   useEffect(() => {
@@ -126,6 +135,7 @@ function AppRoutes() {
 
       <Route path="/tournaments"                    element={<ProtectedRoute><TournamentList /></ProtectedRoute>} />
       <Route path="/tournaments/create"             element={<ProtectedRoute><TournamentCreate /></ProtectedRoute>} />
+      <Route path="/tournaments/:id/post-round"      element={<ProtectedRoute><TournamentPostRound /></ProtectedRoute>} />
       <Route path="/tournaments/:id"                element={<ProtectedRoute><TournamentDetail /></ProtectedRoute>} />
       <Route path="/tournaments/:id/complete"       element={<ProtectedRoute><TournamentComplete /></ProtectedRoute>} />
       <Route path="/tournament-lobby/:gameId"       element={<ProtectedRoute><TournamentLobbyRoom /></ProtectedRoute>} />

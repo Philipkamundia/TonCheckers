@@ -11,6 +11,7 @@ import { useGame, type Board } from '../hooks/useGame';
 import { getAvailableMoves } from '../engine/moves';
 import { PostGame } from './PostGame';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { debugIngest } from '../utils/debugIngest';
 import type { TournamentLobbyPayload } from '../store';
 
 const CELL_SIZE = Math.floor((Math.min(window.innerWidth, 400) - 32) / 8);
@@ -32,6 +33,12 @@ export function GameRoom() {
     setPendingTournamentLobby,
     setActiveTournamentId,
   } = useStore();
+
+  const tournamentIdFromStorage =
+    typeof sessionStorage !== 'undefined' && gameId
+      ? sessionStorage.getItem(`tournamentGame:${gameId}`)
+      : null;
+  const effectiveTournamentId = activeTournamentId ?? tournamentIdFromStorage;
   const { on } = useWebSocket();
   const navigate = useNavigate();
 
@@ -48,12 +55,12 @@ export function GameRoom() {
     return on<TournamentLobbyPayload>('tournament.lobby_ready', (data) => {
       // Only prompt if we're in an active non-tournament game and registered
       // in this tournament.
-      if (!activeTournamentId && participatingTournamentIds.includes(data.tournamentId)) {
+      if (!effectiveTournamentId && participatingTournamentIds.includes(data.tournamentId)) {
         haptic.warning();
         setTournamentPrompt(data);
       }
     });
-  }, [on, activeTournamentId, participatingTournamentIds, haptic]);
+  }, [on, effectiveTournamentId, participatingTournamentIds, haptic]);
 
   // Compute legal moves for highlighting — same engine as AI game
   const legalMoves = useMemo(() => {
@@ -83,14 +90,32 @@ export function GameRoom() {
 
   // Route to tournament bracket after game ends in a tournament
   useEffect(() => {
-    if ((gameState.status === 'completed' || gameState.status === 'crashed') && activeTournamentId) {
+    if ((gameState.status === 'completed' || gameState.status === 'crashed') && effectiveTournamentId) {
+      const tid = effectiveTournamentId;
+      // #region agent log
+      debugIngest({
+        location: 'GameRoom.tsx:tournament_nav',
+        message:  'navigate_after_tournament_game',
+        data:     {
+          target: `/tournaments/${tid}/post-round`,
+          gameStatus: gameState.status,
+          hasPostRoundRoute: true,
+          fromSessionStorage: Boolean(!activeTournamentId && tournamentIdFromStorage),
+        },
+        hypothesisId: 'H2',
+        runId:        'post-fix',
+      });
+      // #endregion
+      try {
+        if (gameId) sessionStorage.removeItem(`tournamentGame:${gameId}`);
+      } catch { /* */ }
       setActiveTournamentId(null);
-      navigate(`/tournaments/${activeTournamentId}`, { replace: true });
+      navigate(`/tournaments/${tid}/post-round`, { replace: true });
     }
-  }, [gameState.status, activeTournamentId]);
+  }, [gameState.status, effectiveTournamentId, activeTournamentId, tournamentIdFromStorage, gameId, navigate, setActiveTournamentId]);
 
   if (gameState.status === 'completed' || gameState.status === 'crashed') {
-    if (activeTournamentId) return null; // useEffect above handles navigation
+    if (effectiveTournamentId) return null; // useEffect above handles navigation
     return <PostGame gameId={gameId!} result={gameState.result} myPlayerNum={myPlayerNum} />;
   }
 

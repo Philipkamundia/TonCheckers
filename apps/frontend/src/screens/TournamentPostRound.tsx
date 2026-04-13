@@ -12,6 +12,7 @@ import { useTelegram } from '../hooks/useTelegram';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useStore } from '../store';
 import { tournamentApi } from '../services/api';
+import { debugIngest } from '../utils/debugIngest';
 import type { TournamentLobbyPayload } from '../store';
 
 interface TournamentDetail {
@@ -32,6 +33,12 @@ export function TournamentPostRound() {
 
   const [tournament, setTournament] = useState<TournamentDetail | null>(null);
   const [nextMatchMsg, setNextMatchMsg] = useState<string>('Waiting for next match…');
+
+  // #region agent log
+  useEffect(() => {
+    debugIngest({ location: 'TournamentPostRound.tsx:mount', message: 'post_round_mounted', data: { tournamentId: tournamentId ?? null }, hypothesisId: 'H3', runId: 'post-fix' });
+  }, [tournamentId]);
+  // #endregion
 
   useEffect(() => {
     return showBackButton(() => navigate('/tournaments'));

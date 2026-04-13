@@ -4,7 +4,7 @@
  * 10-second window for both players to confirm presence before a tournament match.
  * Emits tournament.lobby_join on mount.
  * - Both join  → tournament.game_start → navigate to /game/:gameId
- * - Opponent no-show → tournament.lobby_win (forfeit win) → TournamentPostRound
+ * - Opponent no-show → tournament.lobby_win (forfeit win) → /tournaments/:id/post-round
  * - Self no-show (shouldn't happen here) → tournament.lobby_forfeit
  */
 import { useState, useEffect } from 'react';
@@ -12,6 +12,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
 import { useWebSocket, onReconnect } from '../hooks/useWebSocket';
 import { useStore } from '../store';
+import { debugIngest } from '../utils/debugIngest';
 
 export function TournamentLobbyRoom() {
   const { gameId } = useParams<{ gameId: string }>();
@@ -55,6 +56,9 @@ export function TournamentLobbyRoom() {
         haptic.success();
         setActiveGame(data.gameId, data.playerNumber);
         setActiveTournamentId(data.tournamentId);
+        try {
+          sessionStorage.setItem(`tournamentGame:${data.gameId}`, data.tournamentId);
+        } catch { /* private mode / quota */ }
         setPendingTournamentLobby(null);
         navigate(`/game/${data.gameId}`, { replace: true });
       }),
@@ -64,8 +68,11 @@ export function TournamentLobbyRoom() {
         haptic.success();
         setStatus('forfeit_win');
         setTimeout(() => {
+          // #region agent log
+          debugIngest({ location: 'TournamentLobbyRoom.tsx:lobby_win', message: 'navigate_after_forfeit_win', data: { target: `/tournaments/${data.tournamentId}/post-round`, notPostRound: false }, hypothesisId: 'H4', runId: 'post-fix' });
+          // #endregion
           setPendingTournamentLobby(null);
-          navigate(`/tournaments/${data.tournamentId}`, { replace: true });
+          navigate(`/tournaments/${data.tournamentId}/post-round`, { replace: true });
         }, 2_000);
       }),
 
@@ -74,8 +81,11 @@ export function TournamentLobbyRoom() {
         haptic.error();
         setStatus('forfeit_loss');
         setTimeout(() => {
+          // #region agent log
+          debugIngest({ location: 'TournamentLobbyRoom.tsx:lobby_forfeit', message: 'navigate_after_forfeit_loss', data: { target: `/tournaments/${data.tournamentId}/post-round`, notPostRound: false }, hypothesisId: 'H4', runId: 'post-fix' });
+          // #endregion
           setPendingTournamentLobby(null);
-          navigate(`/tournaments/${data.tournamentId}`, { replace: true });
+          navigate(`/tournaments/${data.tournamentId}/post-round`, { replace: true });
         }, 2_000);
       }),
     ];

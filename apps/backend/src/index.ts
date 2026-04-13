@@ -1,4 +1,7 @@
 import 'dotenv/config';
+import { appendFileSync, existsSync, mkdirSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -59,6 +62,34 @@ const io = new Server(httpServer, {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors({ origin: ALLOWED_ORIGINS, credentials: true }));
+
+/** Dev-only: append NDJSON to repo-root debug-031b9f.log (browser cannot write workspace file). */
+function workspaceDebugLogPath(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const isMonorepoRoot = (dir: string) =>
+    existsSync(join(dir, 'package.json')) && existsSync(join(dir, 'apps', 'backend', 'package.json'));
+  for (const depth of [4, 3, 5, 2]) {
+    const root = join(here, ...Array(depth).fill('..'));
+    if (isMonorepoRoot(root)) return join(root, 'debug-031b9f.log');
+  }
+  const monorepoPkg = join(process.cwd(), '..', '..', 'package.json');
+  if (existsSync(monorepoPkg)) return join(process.cwd(), '..', '..', 'debug-031b9f.log');
+  return join(process.cwd(), 'debug-031b9f.log');
+}
+app.post('/api/debug/ingest', (req, res) => {
+  if (process.env.NODE_ENV === 'production') return res.status(404).end();
+  try {
+    const line = `${JSON.stringify(req.body ?? {})}\n`;
+    const p = workspaceDebugLogPath();
+    mkdirSync(dirname(p), { recursive: true });
+    appendFileSync(p, line, 'utf8');
+    return res.status(204).end();
+  } catch (err) {
+    logger.warn(`debug ingest: ${(err as Error).message}`);
+    return res.status(500).end();
+  }
+});
+
 app.use(helmet());
 app.use(morgan('combined', { stream: { write: (msg: string) => logger.http(msg.trim()) } }));
 app.use(compression());
