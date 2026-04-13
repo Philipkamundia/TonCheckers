@@ -7,7 +7,7 @@
  *
  * rate-limit-redis v4 works with ioredis via a generic sendCommand wrapper.
  */
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import redis from '../config/redis.js';
 
@@ -65,7 +65,7 @@ export const adminRateLimit = rateLimit({
   message: { ok: false, error: 'Too many admin attempts. Try again in 15 minutes.' },
   keyGenerator: (req) => {
     const wallet = req.headers['x-admin-wallet'] as string ?? 'unknown';
-    const ip     = (req.ip ?? '').replace(/^::ffff:/, '');
+    const ip     = ipKeyGenerator(req.ip ?? '');
     return `${ip}:${wallet.slice(-8)}`;
   },
 });
