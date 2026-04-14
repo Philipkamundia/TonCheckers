@@ -33,6 +33,8 @@ export function TournamentPostRound() {
 
   const [tournament, setTournament] = useState<TournamentDetail | null>(null);
   const [nextMatchMsg, setNextMatchMsg] = useState<string>('Waiting for next match…');
+  const [roundPreviewExpiresAt, setRoundPreviewExpiresAt] = useState<number | null>(null);
+  const [roundPreviewCountdown, setRoundPreviewCountdown] = useState<number>(0);
 
   // #region agent log
   useEffect(() => {
@@ -51,6 +53,13 @@ export function TournamentPostRound() {
 
   useEffect(() => {
     const unsubs = [
+      on<{ tournamentId: string; round: number; expiresAt: number }>('tournament.round_preview', (data) => {
+        if (data.tournamentId !== tournamentId) return;
+        setRoundPreviewExpiresAt(data.expiresAt);
+        setNextMatchMsg(`Round ${data.round} bracket is visible. Lobby opens in ${Math.max(0, Math.ceil((data.expiresAt - Date.now()) / 1000))}s`);
+        tournamentApi.get(tournamentId!).then(r => setTournament(r.data.tournament)).catch(() => null);
+      }),
+
       on<TournamentLobbyPayload>('tournament.lobby_ready', (data) => {
         if (data.tournamentId !== tournamentId) return;
         setPendingTournamentLobby(data);
@@ -70,6 +79,18 @@ export function TournamentPostRound() {
     ];
     return () => unsubs.forEach(u => u());
   }, [on, tournamentId]);
+
+  useEffect(() => {
+    if (!roundPreviewExpiresAt) return;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((roundPreviewExpiresAt - Date.now()) / 1000));
+      setRoundPreviewCountdown(remaining);
+      if (remaining === 0) setRoundPreviewExpiresAt(null);
+    };
+    tick();
+    const timer = setInterval(tick, 500);
+    return () => clearInterval(timer);
+  }, [roundPreviewExpiresAt]);
 
   if (!tournament) {
     return <div style={styles.loading}>Loading…</div>;
@@ -101,6 +122,7 @@ export function TournamentPostRound() {
           <p style={styles.bannerEmoji}>✅</p>
           <p style={styles.bannerTitle}>Round {tournament.currentRound - 1} complete</p>
           <p style={styles.bannerSub}>{nextMatchMsg}</p>
+          {roundPreviewCountdown > 0 && <p style={styles.bannerSub}>Next lobby in {roundPreviewCountdown}s</p>}
         </div>
       )}
 

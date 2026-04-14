@@ -25,8 +25,7 @@ interface TournamentData {
 // Phase the bracket screen can be in
 type BracketPhase =
   | 'open'           // tournament not started yet
-  | 'presence'       // 30s presence window — waiting for players
-  | 'match_preview'  // 10s showing pairs before heading to lobby
+  | 'presence'       // 30s bracket/pairing window before lobby starts
   | 'waiting'        // waiting for next opponent to finish their game
   | 'complete_preview' // 10s showing final bracket before complete screen
   | 'done';          // tournament over, navigating away
@@ -51,8 +50,6 @@ export function TournamentDetail() {
   const [phaseCountdown,   setPhaseCountdown]   = useState<number>(0);
   const [bracketExpiresAt, setBracketExpiresAt] = useState<number | null>(null);
 
-  // Pending lobby payload — held during match_preview phase
-  const pendingLobbyRef = useRef<TournamentLobbyPayload | null>(null);
   // Pending complete data — held during complete_preview phase
   const pendingCompleteRef = useRef<{
     isWinner: boolean; winnerUsername: string; winnerPayout: string; prizePool: string;
@@ -119,24 +116,14 @@ export function TournamentDetail() {
     return () => clearInterval(timer);
   }, [phase, bracketExpiresAt]);
 
-  // Match / complete preview — fixed 1s ticks (phase transition resets countdown in handlers)
+  // Complete preview — fixed 1s ticks
   useEffect(() => {
-    if (phase !== 'match_preview' && phase !== 'complete_preview') return;
+    if (phase !== 'complete_preview') return;
     const timer = setInterval(() => {
       setPhaseCountdown(prev => (prev <= 1 ? 0 : prev - 1));
     }, 1000);
     return () => clearInterval(timer);
   }, [phase]);
-
-  // When match_preview countdown hits 0 → go to lobby
-  useEffect(() => {
-    if (phase !== 'match_preview' || phaseCountdown !== 0) return;
-    const lobby = pendingLobbyRef.current;
-    if (!lobby) return;
-    setPendingTournamentLobby(lobby);
-    pendingLobbyRef.current = null;
-    navigate(`/tournament-lobby/${lobby.gameId}`);
-  }, [phase, phaseCountdown, navigate, setPendingTournamentLobby, id]);
 
   // When complete_preview countdown hits 0 → go to complete screen
   useEffect(() => {
@@ -162,16 +149,22 @@ export function TournamentDetail() {
         setPhaseCountdown(remaining);
       }),
 
+      on<{ tournamentId: string; round: number; expiresAt: number }>('tournament.round_preview', (data) => {
+        if (data.tournamentId !== id) return;
+        setBracketExpiresAt(data.expiresAt);
+        const remaining = Math.max(0, Math.ceil((data.expiresAt - Date.now()) / 1000));
+        setPhase('presence');
+        setPhaseCountdown(remaining);
+        setStatusMsg(`Round ${data.round} bracket is locked — lobby opens when timer ends`);
+        void refresh();
+      }),
+
       on<TournamentLobbyPayload>('tournament.lobby_ready', (data) => {
         if (data.tournamentId !== id) return;
         haptic.impact('medium');
-        // Refresh bracket so pairs are visible, then hold for 10s
-        refresh().then(() => {
-          pendingLobbyRef.current = data;
-          setPhase('match_preview');
-          setPhaseCountdown(10);
-          setStatusMsg(null);
-        });
+        setPendingTournamentLobby(data);
+        setStatusMsg(null);
+        navigate(`/tournament-lobby/${data.gameId}`);
       }),
 
       on<{ tournamentId: string }>('tournament.bye_advance', (data) => {
@@ -213,7 +206,7 @@ export function TournamentDetail() {
       }),
     ];
     return () => unsubs.forEach(u => u());
-  }, [on, id, user?.id, removeParticipatingTournament]);
+  }, [on, id, user?.id, removeParticipatingTournament, navigate, setPendingTournamentLobby, haptic]);
 
   // Join button
   useEffect(() => {
@@ -267,18 +260,11 @@ export function TournamentDetail() {
   // Phase banner content
   const phaseBanner = (() => {
     if (phase === 'presence') return {
-      title: '🏆 Tournament Starting!',
-      sub: 'Pairs are being determined — stay on this screen',
-      hint: 'Players not here will be forfeited',
+      title: '🏆 Bracket Stage',
+      sub: 'Bracket is visible and locked before lobby starts',
+      hint: 'Lobby opens automatically when timer ends',
       countdown: phaseCountdown,
       color: phaseCountdown <= 10 ? '#E53935' : '#2AABEE',
-    };
-    if (phase === 'match_preview') return {
-      title: '⚔️ Match Found!',
-      sub: 'Your opponent is ready — heading to lobby soon',
-      hint: 'Game starting in…',
-      countdown: phaseCountdown,
-      color: '#4CAF50',
     };
     if (phase === 'complete_preview') return {
       title: '🏁 Tournament Complete!',

@@ -11,12 +11,14 @@ import { GameService } from './game.service.js';
 import { GameTimerService } from './game-timer.service.js';
 import { TournamentLobbyService } from './tournament-lobby.service.js';
 import { TournamentBracketService } from './tournament-bracket.service.js';
+import { TournamentRoundPreviewService } from './tournament-round-preview.service.js';
 import { initialGameState } from '../engine/board.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { logger } from '../utils/logger.js';
 import type { Server } from 'socket.io';
 
 const VALID_BRACKET_SIZES = [8, 16, 32, 64];
+type PendingRoundMatch = { gameId: string; matchId: string; player1Id: string; player2Id: string };
 
 export class TournamentService {
 
@@ -306,7 +308,9 @@ export class TournamentService {
       if (u) userCache.set(p.userId, u);
     }
 
-    // Create games + lobbies for each match
+    const pendingRoundMatches: PendingRoundMatch[] = [];
+
+    // Create games and persist round matches; lobby opens after 30s preview phase.
     for (const m of matches) {
       if (m.isBye) {
         await pool.query(
@@ -336,20 +340,28 @@ export class TournamentService {
         [tournamentId, game.id, 1, m.matchNumber, m.player1Id, m.player2Id],
       );
 
-      const { expiresAt: lobbyExpiresAt } = await TournamentLobbyService.createLobby(
-        game.id, tournamentId, matchRow.id, m.player1Id!, m.player2Id!,
-      );
+      pendingRoundMatches.push({
+        gameId: game.id,
+        matchId: matchRow.id,
+        player1Id: m.player1Id!,
+        player2Id: m.player2Id!,
+      });
+    }
 
-      io.to(`user:${m.player1Id}`).emit('tournament.lobby_ready', {
-        tournamentId, gameId: game.id, round: 1,
-        opponentId: m.player2Id, opponentUsername: p2Info.username, opponentElo: p2Info.elo,
-        expiresAt: lobbyExpiresAt,
-      });
-      io.to(`user:${m.player2Id}`).emit('tournament.lobby_ready', {
-        tournamentId, gameId: game.id, round: 1,
-        opponentId: m.player1Id, opponentUsername: p1Info.username, opponentElo: p1Info.elo,
-        expiresAt: lobbyExpiresAt,
-      });
+    if (pendingRoundMatches.length > 0) {
+      const preview = await TournamentRoundPreviewService.openWindow(tournamentId, 1, pendingRoundMatches);
+      const playerIds = new Set<string>();
+      for (const match of pendingRoundMatches) {
+        playerIds.add(match.player1Id);
+        playerIds.add(match.player2Id);
+      }
+      for (const userId of playerIds) {
+        io.to(`user:${userId}`).emit('tournament.round_preview', {
+          tournamentId,
+          round: 1,
+          expiresAt: preview.expiresAt,
+        });
+      }
     }
 
     logger.info(`Bracket resolved: ${tournamentId} present=${presentUserIds.length} absent=${absentIds.length} byes=${byePlayers.length}`);
@@ -447,6 +459,7 @@ export class TournamentService {
 
     const { rows: [t] } = await pool.query('SELECT name FROM tournaments WHERE id=$1', [tournamentId]);
 
+    const pendingRoundMatches: PendingRoundMatch[] = [];
     for (const m of newMatches) {
       if (m.isBye && m.player1Id) {
         await pool.query(
@@ -477,30 +490,67 @@ export class TournamentService {
         [tournamentId, game.id, nextRound, m.matchNumber, m.player1Id, m.player2Id],
       );
 
-      const { expiresAt: lobbyExpiresAt } = await TournamentLobbyService.createLobby(
-        game.id, tournamentId, matchRow.id, m.player1Id!, m.player2Id!,
-      );
-
-      await NotificationService.send(m.player1Id!, 'tournament_match_ready', { tournamentName: t?.name, round: nextRound });
-      io.to(`user:${m.player1Id}`).emit('tournament.lobby_ready', {
-        tournamentId, gameId: game.id, round: nextRound,
-        opponentId:       m.player2Id,
-        opponentUsername: p2?.username ?? 'Opponent',
-        opponentElo:      p2?.elo ?? 1200,
-        expiresAt:        lobbyExpiresAt,
-      });
-
-      await NotificationService.send(m.player2Id!, 'tournament_match_ready', { tournamentName: t?.name, round: nextRound });
-      io.to(`user:${m.player2Id}`).emit('tournament.lobby_ready', {
-        tournamentId, gameId: game.id, round: nextRound,
-        opponentId:       m.player1Id,
-        opponentUsername: p1?.username ?? 'Opponent',
-        opponentElo:      p1?.elo ?? 1200,
-        expiresAt:        lobbyExpiresAt,
+      pendingRoundMatches.push({
+        gameId: game.id,
+        matchId: matchRow.id,
+        player1Id: m.player1Id!,
+        player2Id: m.player2Id!,
       });
     }
 
+    if (pendingRoundMatches.length > 0) {
+      const preview = await TournamentRoundPreviewService.openWindow(tournamentId, nextRound, pendingRoundMatches);
+      const playerIds = new Set<string>();
+      for (const match of pendingRoundMatches) {
+        playerIds.add(match.player1Id);
+        playerIds.add(match.player2Id);
+      }
+      for (const userId of playerIds) {
+        io.to(`user:${userId}`).emit('tournament.round_preview', {
+          tournamentId,
+          round: nextRound,
+          expiresAt: preview.expiresAt,
+        });
+      }
+    }
+
     logger.info(`Tournament round ${nextRound} started: ${tournamentId}`);
+  }
+
+  static async activateRoundMatchLobby(
+    tournamentId: string,
+    round: number,
+    match: PendingRoundMatch,
+    io: Server,
+  ): Promise<void> {
+    const { rows: [t] } = await pool.query('SELECT name FROM tournaments WHERE id=$1', [tournamentId]);
+    const { rows: [p1] } = await pool.query('SELECT username, elo FROM users WHERE id=$1', [match.player1Id]);
+    const { rows: [p2] } = await pool.query('SELECT username, elo FROM users WHERE id=$1', [match.player2Id]);
+    const { expiresAt: lobbyExpiresAt } = await TournamentLobbyService.createLobby(
+      match.gameId, tournamentId, match.matchId, match.player1Id, match.player2Id,
+    );
+
+    await NotificationService.send(match.player1Id, 'tournament_match_ready', { tournamentName: t?.name, round });
+    io.to(`user:${match.player1Id}`).emit('tournament.lobby_ready', {
+      tournamentId,
+      gameId: match.gameId,
+      round,
+      opponentId: match.player2Id,
+      opponentUsername: p2?.username ?? 'Opponent',
+      opponentElo: p2?.elo ?? 1200,
+      expiresAt: lobbyExpiresAt,
+    });
+
+    await NotificationService.send(match.player2Id, 'tournament_match_ready', { tournamentName: t?.name, round });
+    io.to(`user:${match.player2Id}`).emit('tournament.lobby_ready', {
+      tournamentId,
+      gameId: match.gameId,
+      round,
+      opponentId: match.player1Id,
+      opponentUsername: p1?.username ?? 'Opponent',
+      opponentElo: p1?.elo ?? 1200,
+      expiresAt: lobbyExpiresAt,
+    });
   }
 
   // ─── Finalize ─────────────────────────────────────────────────────────────
