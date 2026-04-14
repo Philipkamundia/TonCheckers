@@ -63,19 +63,29 @@ async function recoverTransaction(tx: {
     }
 
     // ALWAYS check on-chain before refunding — the transfer may have landed even without a hash.
-    const hotWallet = process.env.HOT_WALLET_ADDRESS;
-    if (hotWallet) {
-      // H-06: Use seqno for precise matching when available; fall back to amount+dest
-    const onChainHash = await checkOnChain(hotWallet, tx.destination, tx.amount, tx.hot_wallet_seqno ?? undefined);
-      if (onChainHash) {
-        await pool.query(
-          `UPDATE transactions SET status='confirmed', ton_tx_hash=$1, updated_at=NOW()
-           WHERE id=$2 AND status='processing'`,
-          [onChainHash, tx.id],
-        );
-        logger.info(`Withdrawal recovery: found on-chain tx=${tx.id} hash=${onChainHash}`);
-        return;
-      }
+    // If HOT_WALLET_ADDRESS is missing, recover from synthetic pending hash format:
+    // pending:{hotAddr}:seq{seqno}:{timestamp}
+    const pendingParts = tx.ton_tx_hash?.startsWith('pending:') ? tx.ton_tx_hash.split(':') : null;
+    const hotWallet = process.env.HOT_WALLET_ADDRESS || (pendingParts?.[1] ?? null);
+    if (!hotWallet) {
+      logger.error(`Withdrawal recovery: cannot verify on-chain for tx=${tx.id} (missing HOT_WALLET_ADDRESS and no pending hot-wallet hint); skipping refund`);
+      return;
+    }
+
+    // H-06: Use seqno for precise matching when available; fall back to amount+dest
+    const onChain = await checkOnChain(hotWallet, tx.destination, tx.amount, tx.hot_wallet_seqno ?? undefined);
+    if (!onChain.queried) {
+      logger.warn(`Withdrawal recovery: TON API unavailable for tx=${tx.id}; skipping auto-refund this run`);
+      return;
+    }
+    if (onChain.hash) {
+      await pool.query(
+        `UPDATE transactions SET status='confirmed', ton_tx_hash=$1, updated_at=NOW()
+         WHERE id=$2 AND status='processing'`,
+        [onChain.hash, tx.id],
+      );
+      logger.info(`Withdrawal recovery: found on-chain tx=${tx.id} hash=${onChain.hash}`);
+      return;
     }
 
     // On-chain check found nothing.
@@ -90,39 +100,20 @@ async function recoverTransaction(tx: {
       logger.warn(`Withdrawal recovery: tx=${tx.id} broadcast ${ageMinutes.toFixed(1)}min ago with no on-chain confirmation — refunding`);
     }
 
-    // Safe to refund — no hash, or pending hash older than 30 min with no on-chain match
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const { rowCount } = await client.query(
-        `UPDATE transactions
-         SET status='failed', admin_note='Auto-refunded by recovery job',
-             refunded_at=NOW(), updated_at=NOW()
-         WHERE id=$1 AND status='processing' AND refunded_at IS NULL`,
-        [tx.id],
-      );
-
-      if (!rowCount) {
-        await client.query('ROLLBACK');
-        logger.info(`Withdrawal recovery: tx=${tx.id} already handled, skipping`);
-        return;
-      }
-
-      await client.query(
-        `UPDATE balances SET available = available + $1::numeric, updated_at=NOW()
-         WHERE user_id = $2`,
-        [tx.amount, tx.user_id],
-      );
-
-      await client.query('COMMIT');
-      logger.warn(`Withdrawal recovery: refunded tx=${tx.id} user=${tx.user_id} amount=${tx.amount} TON`);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    // SECURITY: Never auto-refund from this job.
+    // Automatic credits can be abused if chain verification is delayed/ambiguous.
+    // Leave funds deducted and mark for manual admin review.
+    await pool.query(
+      `UPDATE transactions
+       SET admin_note = COALESCE(admin_note, 'Stuck withdrawal: manual review required (auto-refund disabled)'),
+           updated_at = NOW()
+       WHERE id=$1 AND status='processing'`,
+      [tx.id],
+    );
+    logger.error(
+      `Withdrawal recovery: tx=${tx.id} remains processing with no confirmed on-chain match; manual review required (auto-refund disabled)`,
+    );
+    return;
 
   } catch (err) {
     logger.error(`Withdrawal recovery failed for tx=${tx.id}: ${(err as Error).message}`);
@@ -134,7 +125,7 @@ async function checkOnChain(
   destination: string,
   amount:      string,
   seqno?:      number,
-): Promise<string | null> {
+): Promise<{ hash: string | null; queried: boolean }> {
   try {
     const network = process.env.TON_NETWORK || 'testnet';
     const apiKey  = process.env.TON_API_KEY;
@@ -145,10 +136,10 @@ async function checkOnChain(
     // N-04: Fetch 100 transactions to avoid missing the tx if many withdrawals occurred
     const url = `${base}/getTransactions?address=${hotWallet}&limit=100${apiKey ? `&api_key=${apiKey}` : ''}`;
     const res  = await fetch(url);
-    if (!res.ok) return null;
+    if (!res.ok) return { hash: null, queried: false };
 
     const data = await res.json() as { ok: boolean; result: Array<Record<string, unknown>> };
-    if (!data.ok) return null;
+    if (!data.ok) return { hash: null, queried: false };
 
     const expectedNano = Math.round(parseFloat(amount) * 1e9);
 
@@ -169,17 +160,17 @@ async function checkOnChain(
         if (seqno !== undefined && amountMatch) {
           // The seqno ties this specific broadcast to this specific tx record.
           // A matching (dest + amount + seqno) triple is unambiguous.
-          return txHash;
+          return { hash: txHash, queried: true };
         }
 
         // Fallback: amount + destination only (used when seqno not yet stored)
         if (amountMatch) {
-          return txHash;
+          return { hash: txHash, queried: true };
         }
       }
     }
-    return null;
+    return { hash: null, queried: true };
   } catch {
-    return null;
+    return { hash: null, queried: false };
   }
 }
