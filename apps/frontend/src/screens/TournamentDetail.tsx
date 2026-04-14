@@ -72,15 +72,18 @@ export function TournamentDetail() {
   useEffect(() => { return showBackButton(() => navigate('/tournaments')); }, []);
   useEffect(() => { refresh(); }, [id]);
   useEffect(() => {
-    if (routeState?.startingExpiresAt) {
-      setBracketExpiresAt(routeState.startingExpiresAt);
+    const persisted = id ? Number(sessionStorage.getItem(`tournamentStarting:${id}`) ?? '') : NaN;
+    const persistedExpiresAt = Number.isFinite(persisted) ? persisted : null;
+    const sourceExpiresAt = routeState?.startingExpiresAt ?? persistedExpiresAt;
+    if (sourceExpiresAt && sourceExpiresAt > Date.now()) {
+      setBracketExpiresAt(sourceExpiresAt);
       setPresenceKind('start_wait');
-      const remaining = Math.max(0, Math.ceil((routeState.startingExpiresAt - Date.now()) / 1000));
+      const remaining = Math.max(0, Math.ceil((sourceExpiresAt - Date.now()) / 1000));
       setPhase('presence');
       setPhaseCountdown(remaining);
       setStatusMsg('Waiting for players to join…');
     }
-  }, [routeState?.startingExpiresAt]);
+  }, [routeState?.startingExpiresAt, id]);
 
   // Signal bracket presence on mount + after every reconnect (same screen)
   useEffect(() => {
@@ -103,30 +106,22 @@ export function TournamentDetail() {
     if (tournament.status === 'in_progress' && tournament.currentRound === 0) {
       setPhase('presence');
       setPresenceKind('start_wait');
-      // If we don't have expiresAt yet (e.g. page refresh), default to start-stage 60s.
-      if (!bracketExpiresAt) {
-        setPhaseCountdown(60);
-      }
+      if (!bracketExpiresAt) setStatusMsg('Waiting for start timer sync…');
     } else if (tournament.status === 'open') {
       setPhase('open');
     }
   }, [tournament?.status, tournament?.currentRound]);
 
-  // Presence countdown — server deadline when available, else client fallback
+  // Presence countdown — always derived from server/propagated expiresAt only.
   useEffect(() => {
     if (phase !== 'presence') return;
-    if (bracketExpiresAt) {
-      const tick = () => {
-        const remaining = Math.max(0, Math.ceil((bracketExpiresAt - Date.now()) / 1000));
-        setPhaseCountdown(remaining);
-      };
-      tick();
-      const timer = setInterval(tick, 500);
-      return () => clearInterval(timer);
-    }
-    const timer = setInterval(() => {
-      setPhaseCountdown(prev => (prev <= 1 ? 0 : prev - 1));
-    }, 1000);
+    if (!bracketExpiresAt) return;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((bracketExpiresAt - Date.now()) / 1000));
+      setPhaseCountdown(remaining);
+    };
+    tick();
+    const timer = setInterval(tick, 500);
     return () => clearInterval(timer);
   }, [phase, bracketExpiresAt]);
 
@@ -157,6 +152,9 @@ export function TournamentDetail() {
     const unsubs = [
       on<{ tournamentId: string; expiresAt: number }>('tournament.starting', (data) => {
         if (data.tournamentId !== id) return;
+        try {
+          sessionStorage.setItem(`tournamentStarting:${data.tournamentId}`, String(data.expiresAt));
+        } catch { /* */ }
         setBracketExpiresAt(data.expiresAt);
         const remaining = Math.max(0, Math.ceil((data.expiresAt - Date.now()) / 1000));
         setPhase('presence');
@@ -167,6 +165,9 @@ export function TournamentDetail() {
 
       on<{ tournamentId: string; round: number; expiresAt: number }>('tournament.round_preview', (data) => {
         if (data.tournamentId !== id) return;
+        try {
+          sessionStorage.removeItem(`tournamentStarting:${data.tournamentId}`);
+        } catch { /* */ }
         setBracketExpiresAt(data.expiresAt);
         const remaining = Math.max(0, Math.ceil((data.expiresAt - Date.now()) / 1000));
         setPhase('presence');

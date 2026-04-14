@@ -41,6 +41,9 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
 type StartingPayload = { tournamentId: string; tournamentName: string; expiresAt: number };
 let _startingHandlers: Array<(data: StartingPayload) => void> = [];
 onGlobal<StartingPayload>('tournament.starting', (data) => {
+  try {
+    sessionStorage.setItem(`tournamentStarting:${data.tournamentId}`, String(data.expiresAt));
+  } catch { /* */ }
   _startingHandlers.forEach(h => h(data));
 });
 
@@ -79,6 +82,11 @@ function AppRoutes() {
 
   function acceptTournament(tournamentId: string) {
     const prompt = tournamentPrompts.find(p => p.tournamentId === tournamentId);
+    if (prompt) {
+      try {
+        sessionStorage.setItem(`tournamentStarting:${tournamentId}`, String(prompt.expiresAt));
+      } catch { /* */ }
+    }
     setTournamentPrompts(prev => prev.filter(p => p.tournamentId !== tournamentId));
     navigate(`/tournaments/${tournamentId}`, {
       state: prompt ? { startingExpiresAt: prompt.expiresAt } : undefined,
