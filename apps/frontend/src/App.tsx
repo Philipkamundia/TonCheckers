@@ -23,6 +23,7 @@ import { Profile }                from './screens/Profile';
 import { AdminDashboard }         from './screens/AdminDashboard';
 import { onGlobal }  from './hooks/useWebSocket';
 import { debugIngest } from './utils/debugIngest';
+import { tournamentApi } from './services/api';
 
 const MANIFEST_URL = `${import.meta.env.VITE_APP_URL ?? 'https://toncheckers.pages.dev'}/tonconnect-manifest.json`;
 
@@ -73,6 +74,57 @@ function AppRoutes() {
     _startingHandlers.push(handler);
     return () => { _startingHandlers = _startingHandlers.filter(h => h !== handler); };
   }, []);
+
+  // Recover active tournament.starting prompts on app reopen while timer is still active.
+  useEffect(() => {
+    if (!accessToken || !user?.id) return;
+    (async () => {
+      try {
+        const { data } = await tournamentApi.list('in_progress');
+        const inProgress = (data?.tournaments ?? []) as Array<{ id: string; name: string; currentRound: number }>;
+        const candidates = inProgress.filter(t => t.currentRound === 0);
+        if (!candidates.length) return;
+
+        const details = await Promise.all(
+          candidates.map(async (t) => {
+            try {
+              const r = await tournamentApi.get(t.id);
+              return r.data?.tournament as {
+                id: string;
+                name: string;
+                startedAt?: string;
+                currentRound: number;
+                participants: Array<{ userId: string; isEliminated: boolean }>;
+              };
+            } catch {
+              return null;
+            }
+          }),
+        );
+
+        const recovered: StartingPayload[] = [];
+        for (const t of details) {
+          if (!t || t.currentRound !== 0 || !t.startedAt) continue;
+          const me = t.participants.find(p => p.userId === user.id);
+          if (!me || me.isEliminated) continue;
+          const expiresAt = new Date(t.startedAt).getTime() + 60_000;
+          if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) continue;
+          recovered.push({ tournamentId: t.id, tournamentName: t.name, expiresAt });
+        }
+
+        if (!recovered.length) return;
+        setTournamentPrompts(prev => {
+          const merged = [...prev];
+          for (const p of recovered) {
+            if (!merged.find(x => x.tournamentId === p.tournamentId)) merged.push(p);
+          }
+          return merged;
+        });
+      } catch {
+        // best-effort recovery only
+      }
+    })();
+  }, [accessToken, user?.id]);
 
   // Keep countdown labels in prompts fresh.
   useEffect(() => {

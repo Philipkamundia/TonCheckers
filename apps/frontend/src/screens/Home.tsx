@@ -57,11 +57,15 @@ export function Home() {
         <button style={styles.walletBtn} onClick={() => navigate('/withdraw')}>Withdraw</button>
       </div>
 
-      {/* Community link */}
-      <a href="https://t.me/toncheckersApp" target="_blank" rel="noopener noreferrer" style={styles.communityLink}>
+      {/* Community action */}
+      <button
+        type="button"
+        style={styles.communityBtn}
+        onClick={() => window.open('https://t.me/toncheckersApp', '_blank', 'noopener,noreferrer')}
+      >
         <span style={styles.tgIcon}>✈️</span>
         <span>Join TonCheckers Community</span>
-      </a>
+      </button>
     </div>
   );
 }
@@ -99,6 +103,6 @@ const styles: Record<string, React.CSSProperties> = {
   modeSubtitle: { color:'var(--tg-theme-hint-color)', fontSize:12 },
   walletRow:    { display:'flex', gap:12, marginBottom:12 },
   walletBtn:    { flex:1, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'14px', color:'var(--tg-theme-text-color)', fontSize:15, fontWeight:500, cursor:'pointer' },
-  communityLink:{ display:'flex', alignItems:'center', justifyContent:'center', gap:8, color:'#2AABEE', fontSize:13, fontWeight:500, textDecoration:'none', padding:'8px 0' },
+  communityBtn: { width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'12px 14px', color:'#2AABEE', fontSize:14, fontWeight:600, cursor:'pointer' },
   tgIcon:       { fontSize:16 },
 };
