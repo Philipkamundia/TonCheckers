@@ -52,6 +52,7 @@ export function TournamentDetail() {
   const [phaseCountdown,   setPhaseCountdown]   = useState<number>(0);
   const [bracketExpiresAt, setBracketExpiresAt] = useState<number | null>(null);
   const [presenceKind, setPresenceKind] = useState<'start_wait' | 'round_preview'>('start_wait');
+  const hasActiveStartWindow = presenceKind === 'start_wait' && Boolean(bracketExpiresAt && bracketExpiresAt > Date.now());
 
   // Pending complete data — held during complete_preview phase
   const pendingCompleteRef = useRef<{
@@ -81,7 +82,7 @@ export function TournamentDetail() {
       const remaining = Math.max(0, Math.ceil((sourceExpiresAt - Date.now()) / 1000));
       setPhase('presence');
       setPhaseCountdown(remaining);
-      setStatusMsg('Waiting for players to join…');
+      setStatusMsg('Waiting for players to join/accept…');
     }
   }, [routeState?.startingExpiresAt, id]);
 
@@ -107,10 +108,10 @@ export function TournamentDetail() {
       setPhase('presence');
       setPresenceKind('start_wait');
       if (!bracketExpiresAt) setStatusMsg('Waiting for start timer sync…');
-    } else if (tournament.status === 'open') {
+    } else if (tournament.status === 'open' && !hasActiveStartWindow) {
       setPhase('open');
     }
-  }, [tournament?.status, tournament?.currentRound]);
+  }, [tournament?.status, tournament?.currentRound, hasActiveStartWindow, bracketExpiresAt]);
 
   // Presence countdown — always derived from server/propagated expiresAt only.
   useEffect(() => {
@@ -159,7 +160,7 @@ export function TournamentDetail() {
         const remaining = Math.max(0, Math.ceil((data.expiresAt - Date.now()) / 1000));
         setPhase('presence');
         setPresenceKind('start_wait');
-        setStatusMsg('Waiting for players to join…');
+        setStatusMsg('Waiting for players to join/accept…');
         setPhaseCountdown(remaining);
       }),
 
@@ -280,7 +281,7 @@ export function TournamentDetail() {
     if (phase === 'presence') return {
       title: presenceKind === 'start_wait' ? '🏆 Tournament Starting' : '🏆 Bracket Stage',
       sub: presenceKind === 'start_wait'
-        ? 'Waiting for players to join'
+        ? 'Waiting for players to join/accept'
         : 'Bracket is visible and locked before lobby starts',
       hint: presenceKind === 'start_wait'
         ? 'Pairs are formed when this timer reaches zero'
