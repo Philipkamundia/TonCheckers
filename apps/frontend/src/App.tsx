@@ -78,8 +78,11 @@ function AppRoutes() {
   }, []);
 
   function acceptTournament(tournamentId: string) {
+    const prompt = tournamentPrompts.find(p => p.tournamentId === tournamentId);
     setTournamentPrompts(prev => prev.filter(p => p.tournamentId !== tournamentId));
-    navigate(`/tournaments/${tournamentId}`);
+    navigate(`/tournaments/${tournamentId}`, {
+      state: prompt ? { startingExpiresAt: prompt.expiresAt } : undefined,
+    });
   }
 
   function declineTournament(tournamentId: string) {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
 import { useWebSocket, onReconnect } from '../hooks/useWebSocket';
 import { useStore } from '../store';
@@ -32,6 +32,8 @@ type BracketPhase =
 
 export function TournamentDetail() {
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
+  const routeState = location.state as { startingExpiresAt?: number } | null;
   const { showBackButton, showMainButton, hideMainButton, setMainButtonLoading, haptic } = useTelegram();
   const { on, emit } = useWebSocket();
   const {
@@ -49,6 +51,7 @@ export function TournamentDetail() {
   const [phase,            setPhase]            = useState<BracketPhase>('open');
   const [phaseCountdown,   setPhaseCountdown]   = useState<number>(0);
   const [bracketExpiresAt, setBracketExpiresAt] = useState<number | null>(null);
+  const [presenceKind, setPresenceKind] = useState<'start_wait' | 'round_preview'>('start_wait');
 
   // Pending complete data — held during complete_preview phase
   const pendingCompleteRef = useRef<{
@@ -68,6 +71,16 @@ export function TournamentDetail() {
 
   useEffect(() => { return showBackButton(() => navigate('/tournaments')); }, []);
   useEffect(() => { refresh(); }, [id]);
+  useEffect(() => {
+    if (routeState?.startingExpiresAt) {
+      setBracketExpiresAt(routeState.startingExpiresAt);
+      setPresenceKind('start_wait');
+      const remaining = Math.max(0, Math.ceil((routeState.startingExpiresAt - Date.now()) / 1000));
+      setPhase('presence');
+      setPhaseCountdown(remaining);
+      setStatusMsg('Waiting for players to join…');
+    }
+  }, [routeState?.startingExpiresAt]);
 
   // Signal bracket presence on mount + after every reconnect (same screen)
   useEffect(() => {
@@ -89,9 +102,10 @@ export function TournamentDetail() {
     if (!tournament) return;
     if (tournament.status === 'in_progress' && tournament.currentRound === 0) {
       setPhase('presence');
-      // If we don't have expiresAt yet (e.g. page refresh), default to 30s from now
+      setPresenceKind('start_wait');
+      // If we don't have expiresAt yet (e.g. page refresh), default to start-stage 60s.
       if (!bracketExpiresAt) {
-        setPhaseCountdown(30);
+        setPhaseCountdown(60);
       }
     } else if (tournament.status === 'open') {
       setPhase('open');
@@ -146,6 +160,8 @@ export function TournamentDetail() {
         setBracketExpiresAt(data.expiresAt);
         const remaining = Math.max(0, Math.ceil((data.expiresAt - Date.now()) / 1000));
         setPhase('presence');
+        setPresenceKind('start_wait');
+        setStatusMsg('Waiting for players to join…');
         setPhaseCountdown(remaining);
       }),
 
@@ -154,6 +170,7 @@ export function TournamentDetail() {
         setBracketExpiresAt(data.expiresAt);
         const remaining = Math.max(0, Math.ceil((data.expiresAt - Date.now()) / 1000));
         setPhase('presence');
+        setPresenceKind('round_preview');
         setPhaseCountdown(remaining);
         setStatusMsg(`Round ${data.round} bracket is locked — lobby opens when timer ends`);
         void refresh();
@@ -260,9 +277,13 @@ export function TournamentDetail() {
   // Phase banner content
   const phaseBanner = (() => {
     if (phase === 'presence') return {
-      title: '🏆 Bracket Stage',
-      sub: 'Bracket is visible and locked before lobby starts',
-      hint: 'Lobby opens automatically when timer ends',
+      title: presenceKind === 'start_wait' ? '🏆 Tournament Starting' : '🏆 Bracket Stage',
+      sub: presenceKind === 'start_wait'
+        ? 'Waiting for players to join'
+        : 'Bracket is visible and locked before lobby starts',
+      hint: presenceKind === 'start_wait'
+        ? 'Pairs are formed when this timer reaches zero'
+        : 'Lobby opens automatically when timer ends',
       countdown: phaseCountdown,
       color: phaseCountdown <= 10 ? '#E53935' : '#2AABEE',
     };
