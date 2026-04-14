@@ -7,7 +7,7 @@
  * - If proof unavailable (wallet already connected before app opened): falls back to verify
  *   which is safe for returning users since they proved ownership on first connect
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTonConnectUI, useTonWallet } from '@tonconnect/ui-react';
 import { useTelegram } from '../hooks/useTelegram';
 import { useStore } from '../store';
@@ -20,6 +20,11 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
   const [error,   setError]   = useState<string | null>(null);
   const [tonConnectUI] = useTonConnectUI();
   const wallet = useTonWallet();
+  const latestWalletRef = useRef(wallet);
+
+  useEffect(() => {
+    latestWalletRef.current = wallet;
+  }, [wallet]);
 
   // Auto-authenticate when wallet connects — but only if not in a logged-out state
   useEffect(() => {
@@ -45,6 +50,16 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
     await doAuth(wallet, initData);
   }
 
+  async function waitForTonProof(timeoutMs = 2_500, tickMs = 150) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const p = latestWalletRef.current?.connectItems?.tonProof;
+      if (p && 'proof' in p) return p.proof;
+      await new Promise(r => setTimeout(r, tickMs));
+    }
+    return null;
+  }
+
   async function doAuth(connectedWallet: NonNullable<typeof wallet>, currentInitData: string) {
     if (!currentInitData) {
       setError('Telegram session not found. Please reopen the app from Telegram.');
@@ -54,12 +69,12 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
     setError(null);
     try {
       const address = connectedWallet.account.address;
-      const proof   = connectedWallet.connectItems?.tonProof;
+      const proof = await waitForTonProof();
 
       let res;
-      if (proof && 'proof' in proof) {
+      if (proof) {
         // tonProof available — use connect (verifies ownership, handles new + returning)
-        res = await authApi.connect({ walletAddress: address, proof: proof.proof, initData: currentInitData });
+        res = await authApi.connect({ walletAddress: address, proof, initData: currentInitData });
       } else {
         // No proof — wallet was already connected before app opened.
         // Safe for returning users (already proved ownership on first connect).
@@ -71,6 +86,7 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
           if (code === 'USER_NOT_FOUND') {
             // New user with no proof yet — prompt reconnect to get fresh proof
             setError('Please tap "Connect Wallet" again to verify wallet ownership.');
+            openWalletModal();
             haptic.error();
             setLoading(false);
             return;

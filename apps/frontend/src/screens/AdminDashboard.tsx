@@ -226,6 +226,9 @@ export function AdminDashboard() {
 
 // ── Tab content ──────────────────────────────────────────────────────────────
 function TabContent({ tab, data, onRefresh }: { tab: AdminTab; data: Record<string, unknown>; onRefresh: () => void }) {
+  const [actingTxId, setActingTxId] = useState<string | null>(null);
+  const [actingKind, setActingKind] = useState<'approve' | 'reject' | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   if (tab === 'treasury' && data.treasury) {
     const t = data.treasury as Record<string, string | null>;
@@ -242,8 +245,29 @@ function TabContent({ tab, data, onRefresh }: { tab: AdminTab; data: Record<stri
   if (tab === 'withdrawals') {
     const ws = (data.withdrawals ?? []) as Array<Record<string, string>>;
     if (!ws.length) return <EmptyState icon="✅" text="No pending withdrawals" />;
+    const runAction = async (id: string, kind: 'approve' | 'reject') => {
+      if (actingTxId) return;
+      setActionError(null);
+      setActingTxId(id);
+      setActingKind(kind);
+      try {
+        if (kind === 'approve') {
+          await api.post(`/api/admin/withdrawals/${id}/approve`);
+        } else {
+          await api.post(`/api/admin/withdrawals/${id}/reject`, { reason: 'Rejected by admin' });
+        }
+        onRefresh();
+      } catch (e: unknown) {
+        const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+        setActionError(msg ?? `Failed to ${kind} withdrawal`);
+      } finally {
+        setActingTxId(null);
+        setActingKind(null);
+      }
+    };
     return (
       <div>
+        {actionError && <p style={s.error}>{actionError}</p>}
         {ws.map(w => (
           <div key={w.id} style={s.itemCard}>
             <div style={s.itemRow}>
@@ -253,8 +277,20 @@ function TabContent({ tab, data, onRefresh }: { tab: AdminTab; data: Record<stri
             <p style={s.itemSub}>{w.destination}</p>
             <p style={s.itemSub}>{new Date(w.created_at).toLocaleString()}</p>
             <div style={s.btnRow}>
-              <button style={s.approveBtn} onClick={async () => { await api.post(`/api/admin/withdrawals/${w.id}/approve`); onRefresh(); }}>✅ Approve</button>
-              <button style={s.rejectBtn}  onClick={async () => { await api.post(`/api/admin/withdrawals/${w.id}/reject`, { reason: 'Rejected by admin' }); onRefresh(); }}>❌ Reject</button>
+              <button
+                style={{ ...s.approveBtn, ...(actingTxId ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
+                disabled={Boolean(actingTxId)}
+                onClick={() => runAction(w.id, 'approve')}
+              >
+                {actingTxId === w.id && actingKind === 'approve' ? 'Approving...' : '✅ Approve'}
+              </button>
+              <button
+                style={{ ...s.rejectBtn, ...(actingTxId ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
+                disabled={Boolean(actingTxId)}
+                onClick={() => runAction(w.id, 'reject')}
+              >
+                {actingTxId === w.id && actingKind === 'reject' ? 'Rejecting...' : '❌ Reject'}
+              </button>
             </div>
           </div>
         ))}
