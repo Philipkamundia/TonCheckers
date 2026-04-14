@@ -33,7 +33,7 @@ export function TournamentComplete() {
   }, []);
 
   useEffect(() => {
-    return showMainButton('Back to Tournaments', () => navigate('/tournaments', { replace: true }), { color: '#2AABEE' });
+    return showMainButton('Back to Home', () => navigate('/', { replace: true }), { color: '#2AABEE' });
   }, []);
 
   if (!state) return null;

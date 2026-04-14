@@ -9,6 +9,8 @@
 import { Server } from 'socket.io';
 import { TournamentLobbyService } from '../services/tournament-lobby.service.js';
 import { TournamentService } from '../services/tournament.service.js';
+import { GameService } from '../services/game.service.js';
+import { GameTimerService } from '../services/game-timer.service.js';
 import { logger } from '../utils/logger.js';
 
 export function startTournamentLobbyCheck(io: Server): ReturnType<typeof setInterval> {
@@ -21,6 +23,24 @@ export function startTournamentLobbyCheck(io: Server): ReturnType<typeof setInte
         const joined = await TournamentLobbyService.getJoinedPlayers(gameId);
         await TournamentLobbyService.clearLobby(gameId);
 
+        const bothJoined = joined.includes(meta.player1Id) && joined.includes(meta.player2Id);
+        if (bothJoined) {
+          await GameService.activateGame(gameId);
+          await GameTimerService.startTimer(gameId, 1);
+          io.to(`user:${meta.player1Id}`).emit('tournament.game_start', {
+            gameId,
+            tournamentId: meta.tournamentId,
+            playerNumber: 1,
+          });
+          io.to(`user:${meta.player2Id}`).emit('tournament.game_start', {
+            gameId,
+            tournamentId: meta.tournamentId,
+            playerNumber: 2,
+          });
+          logger.info(`Tournament lobby window ended: game=${gameId} both present — game started`);
+          continue;
+        }
+
         let winnerId: string;
         let loserId:  string;
 
@@ -31,8 +51,7 @@ export function startTournamentLobbyCheck(io: Server): ReturnType<typeof setInte
           winnerId = meta.player2Id;
           loserId  = meta.player1Id;
         } else {
-          // Neither or both joined but game wasn't activated — shouldn't happen,
-          // but if neither showed up, player1 advances (higher seed by bracket order)
+          // Neither joined — player1 advances by convention.
           winnerId = meta.player1Id;
           loserId  = meta.player2Id;
         }
