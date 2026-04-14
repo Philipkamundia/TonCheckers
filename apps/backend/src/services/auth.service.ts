@@ -152,47 +152,56 @@ export class AuthService {
         return false;
       }
 
-      // Extract public key from stateInit
-      if (!proof.stateInit) {
-        // stateInit is required to extract the wallet public key for Ed25519 signature
-        // verification. Without it we cannot cryptographically prove wallet ownership.
-        // We do NOT fall back to accepting without verification — doing so would allow
-        // any attacker who knows a wallet address to gain access without owning it.
-        logger.warn(`Missing stateInit for ${walletAddress} — proof rejected (cannot verify without public key)`);
-        return false;
-      }
-      const stateInitBuf = Buffer.from(proof.stateInit, 'base64');
-      if (stateInitBuf.length < 32) {
-        logger.warn(`stateInit too short (${stateInitBuf.length} bytes) for ${walletAddress}`);
-        return false;
-      }
+      // Extract public key from stateInit when present; otherwise use TonConnect publicKey.
+      let pubKey: Buffer | null = null;
+      if (proof.stateInit) {
+        const stateInitBuf = Buffer.from(proof.stateInit, 'base64');
+        if (stateInitBuf.length < 32) {
+          logger.warn(`stateInit too short (${stateInitBuf.length} bytes) for ${walletAddress}`);
+          return false;
+        }
 
-      // Try to extract public key using @ton/core Cell parsing first (most reliable)
-      // Falls back to last-32-bytes heuristic if parsing fails
-      let pubKey: Buffer;
-      try {
-        const { Cell } = await import('@ton/core');
-        const cell  = Cell.fromBoc(stateInitBuf)[0];
-        const slice = cell.beginParse();
-        slice.loadBits(2); // split_depth + special
-        slice.loadMaybeRef(); // code ref
-        const dataRef = slice.loadMaybeRef();
-        if (dataRef) {
-          const data = dataRef.beginParse();
-          data.loadUint(32); // seqno or subwallet_id
-          pubKey = Buffer.from(data.loadBuffer(32));
-        } else {
+        // Try to extract public key using @ton/core Cell parsing first (most reliable)
+        // Falls back to last-32-bytes heuristic if parsing fails.
+        try {
+          const { Cell } = await import('@ton/core');
+          const cell  = Cell.fromBoc(stateInitBuf)[0];
+          const slice = cell.beginParse();
+          slice.loadBits(2); // split_depth + special
+          slice.loadMaybeRef(); // code ref
+          const dataRef = slice.loadMaybeRef();
+          if (dataRef) {
+            const data = dataRef.beginParse();
+            data.loadUint(32); // seqno or subwallet_id
+            pubKey = Buffer.from(data.loadBuffer(32));
+          } else {
+            pubKey = stateInitBuf.slice(-32);
+          }
+        } catch {
+          // Fallback: last 32 bytes
           pubKey = stateInitBuf.slice(-32);
         }
-      } catch {
-        // Fallback: last 32 bytes
-        pubKey = stateInitBuf.slice(-32);
+      } else if (proof.publicKey) {
+        const raw = proof.publicKey.trim().replace(/^0x/i, '');
+        if (/^[0-9a-fA-F]{64}$/.test(raw)) {
+          pubKey = Buffer.from(raw, 'hex');
+        } else {
+          logger.warn(`Invalid publicKey format for ${walletAddress}`);
+          return false;
+        }
+      } else {
+        logger.warn(`Missing stateInit/publicKey for ${walletAddress} — proof rejected`);
+        return false;
+      }
+      if (!pubKey || pubKey.length !== 32) {
+        logger.warn(`Public key length invalid for ${walletAddress}`);
+        return false;
       }
 
       const { signVerify } = await import('@ton/crypto');
       const valid = await signVerify(finalHash, sigBuf, pubKey);
       if (!valid) {
-        logger.warn(`TonConnect signature invalid for ${walletAddress} — pubKey=${pubKey.toString('hex').slice(0,16)}… stateInitLen=${stateInitBuf.length}`);
+        logger.warn(`TonConnect signature invalid for ${walletAddress} — pubKey=${pubKey.toString('hex').slice(0,16)}…`);
         return false;
       }
 

@@ -10,6 +10,7 @@ export const ConnectWalletSchema = z.object({
     signature:  z.string(),
     payload:    z.string(),
     stateInit:  z.string().optional(),
+    publicKey:  z.string().optional(),
   }),
   walletAddress,
   initData: z.string().min(1),

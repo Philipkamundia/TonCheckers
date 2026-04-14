@@ -74,7 +74,14 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       let res;
       if (proof) {
         // tonProof available — use connect (verifies ownership, handles new + returning)
-        res = await authApi.connect({ walletAddress: address, proof, initData: currentInitData });
+        res = await authApi.connect({
+          walletAddress: address,
+          proof: {
+            ...proof,
+            publicKey: connectedWallet.account.publicKey,
+          },
+          initData: currentInitData,
+        });
       } else {
         // No proof — wallet was already connected before app opened.
         // Safe for returning users (already proved ownership on first connect).
