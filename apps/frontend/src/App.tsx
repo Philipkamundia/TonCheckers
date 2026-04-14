@@ -49,7 +49,7 @@ onGlobal<StartingPayload>('tournament.starting', (data) => {
 });
 
 function AppRoutes() {
-  const { accessToken, user } = useStore();
+  const { accessToken, user, setUser, setBalance } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
   const postAuthPath = '/';
@@ -74,6 +74,24 @@ function AppRoutes() {
     _startingHandlers.push(handler);
     return () => { _startingHandlers = _startingHandlers.filter(h => h !== handler); };
   }, []);
+
+  // Global user/tournament realtime sync
+  useEffect(() => {
+    const offProfile = onGlobal<{
+      id: string; username: string; elo: number; walletAddress: string;
+      gamesPlayed: number; gamesWon: number; gamesLost: number; gamesDrawn: number; totalWon: string;
+    }>('user.profile_updated', (data) => {
+      if (!user?.id || data.id !== user.id) return;
+      setUser(data as any);
+    });
+    const offBalance = onGlobal<{ available: string; locked: string; total: string }>('user.balance_updated', (data) => {
+      setBalance(data);
+    });
+    return () => {
+      offProfile();
+      offBalance();
+    };
+  }, [user?.id, setUser, setBalance]);
 
   // Recover active tournament.starting prompts on app reopen while timer is still active.
   useEffect(() => {

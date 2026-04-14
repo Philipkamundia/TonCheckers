@@ -157,7 +157,7 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
       if (condition.status === 'draw') {
         await GameTimerService.clearTimer(gameId);
         const drawResult = await SettlementService.settleDraw(
-          gameId, game.player1Id, game.player2Id!, game.stake,
+          gameId, game.player1Id, game.player2Id!, game.stake, io,
         );
         const drawMessage = condition.reason === 'no_capture_limit'
           ? 'Draw — 50 moves without capture. Stakes returned in full.'

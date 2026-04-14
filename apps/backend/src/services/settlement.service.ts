@@ -37,6 +37,23 @@ export interface DrawResult {
 }
 
 export class SettlementService {
+  private static async emitUserSync(io: Server, userId: string): Promise<void> {
+    const { rows: [user] } = await pool.query(
+      `SELECT id, username, elo, wallet_address AS "walletAddress", games_played AS "gamesPlayed",
+              games_won AS "gamesWon", games_lost AS "gamesLost", games_drawn AS "gamesDrawn",
+              total_won::text AS "totalWon"
+       FROM users WHERE id=$1`,
+      [userId],
+    );
+    const { rows: [balance] } = await pool.query(
+      `SELECT available::text AS available, locked::text AS locked,
+              (available + locked)::text AS total
+       FROM balances WHERE user_id=$1`,
+      [userId],
+    );
+    if (user) io.to(`user:${userId}`).emit('user.profile_updated', user);
+    if (balance) io.to(`user:${userId}`).emit('user.balance_updated', balance);
+  }
 
   /**
    * PRD §12: (Stake × 2) × 0.85
@@ -190,6 +207,13 @@ export class SettlementService {
       `fee=${platformFee} eloW=+${elo.player1Delta} eloL=${elo.player2Delta} reason=${reason}`,
     );
 
+    if (io) {
+      await Promise.allSettled([
+        SettlementService.emitUserSync(io, winnerId),
+        SettlementService.emitUserSync(io, loserId),
+      ]);
+    }
+
     // Advance tournament bracket if this game belongs to a tournament match
     if (io) {
       const { rows: [match] } = await pool.query(
@@ -210,6 +234,7 @@ export class SettlementService {
    */
   static async settleDraw(
     gameId: string, player1Id: string, player2Id: string, stakeEach: string,
+    io?: Server,
   ): Promise<DrawResult> {
     const client = await pool.connect();
     try {
@@ -253,6 +278,12 @@ export class SettlementService {
     }
 
     logger.info(`Draw: game=${gameId} stake=${stakeEach} returned to both`);
+    if (io) {
+      await Promise.allSettled([
+        SettlementService.emitUserSync(io, player1Id),
+        SettlementService.emitUserSync(io, player2Id),
+      ]);
+    }
     return { gameId, player1Id, player2Id, stake: stakeEach };
   }
 }

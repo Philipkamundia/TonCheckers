@@ -22,6 +22,7 @@ export function makeTournamentController(io: Server) {
           req.user!.userId, parsed.data.name, parsed.data.bracketSize,
           parsed.data.entryFee, parsed.data.startsAt,
         );
+        io.emit('tournament.updated', { tournamentId: t.id, kind: 'created' });
         return res.status(201).json({ ok: true, tournament: t });
       } catch (err) { return next(err); }
     },
@@ -44,6 +45,7 @@ export function makeTournamentController(io: Server) {
     async join(req: Request, res: Response, next: NextFunction) {
       try {
         const result = await TournamentService.joinTournament(req.params.id, req.user!.userId);
+        io.emit('tournament.updated', { tournamentId: req.params.id, kind: 'joined' });
         return res.json({ ok: true, ...result });
       } catch (err) { return next(err); }
     },

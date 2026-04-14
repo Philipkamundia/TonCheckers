@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
 import { tournamentApi } from '../services/api';
+import { onGlobal } from '../hooks/useWebSocket';
 
 interface Tournament {
   id: string; name: string; status: string; bracketSize: number;
@@ -20,15 +21,30 @@ export function TournamentList() {
   const [tournaments,  setTournaments]  = useState<Tournament[]>([]);
   const [loading,      setLoading]      = useState(true);
 
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const r = await tournamentApi.list(tab);
+      setTournaments(r.data.tournaments);
+    } catch {
+      // no-op
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => { return showBackButton(() => navigate('/')); }, []);
   useEffect(() => { return showMainButton('Create Tournament', () => navigate('/tournaments/create'), { color: '#2AABEE' }); }, []);
 
   useEffect(() => {
-    setLoading(true);
-    tournamentApi.list(tab)
-      .then(r => setTournaments(r.data.tournaments))
-      .catch(() => null)
-      .finally(() => setLoading(false));
+    refresh();
+  }, [tab]);
+
+  useEffect(() => {
+    const off = onGlobal<{ tournamentId: string; kind: 'created' | 'joined' }>('tournament.updated', () => {
+      refresh();
+    });
+    return () => off();
   }, [tab]);
 
   return (
