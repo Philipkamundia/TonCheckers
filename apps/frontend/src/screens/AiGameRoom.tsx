@@ -60,7 +60,7 @@ export function AiGameRoom() {
           setTimeout(() => {
             setBoard(data.board);
             setAiPiece(null);
-          }, 500);
+          }, 700);
         } else {
           setBoard(data.board);
         }
@@ -151,7 +151,7 @@ export function AiGameRoom() {
           setTimeout(() => {
             setBoard(newBoard);
             setHumanPiece(null);
-          }, 350);
+          }, 500);
         }
         setAiThinking(true);
         emit('ai.move', { gameId, from: selected, to: { row, col } });

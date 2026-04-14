@@ -18,6 +18,8 @@ import { getAiMove, type AiDifficulty } from '../engine/ai/index.js';
 import { logger } from '../utils/logger.js';
 import type { Server } from 'socket.io';
 
+const AI_THINKING_DELAY_MS = 2_000;
+
 export class AiGameService {
 
   /** Create a new AI game record and return the game ID */
@@ -111,21 +113,11 @@ export class AiGameService {
       };
     }
 
-    // AI takes its turn — add human-like thinking delay scaled by difficulty
+    // AI takes its turn with a fixed 2s delay for predictable pacing.
     await GameTimerService.startTimer(gameId, 2);
 
     const difficulty = game.aiDifficulty as AiDifficulty;
-
-    // Thinking delay: beginner is quick but inconsistent, master takes longer
-    const thinkingDelay: Record<AiDifficulty, [number, number]> = {
-      beginner:     [800,  1500],  // 0.8–1.5s
-      intermediate: [1200, 2500],  // 1.2–2.5s
-      hard:         [2000, 4000],  // 2–4s
-      master:       [3500, 6000],  // 3.5–6s
-    };
-    const [minMs, maxMs] = thinkingDelay[difficulty];
-    const delay = minMs + Math.random() * (maxMs - minMs);
-    await new Promise(r => setTimeout(r, delay));
+    await new Promise(r => setTimeout(r, AI_THINKING_DELAY_MS));
 
     const aiMoveResult = getAiMove(state1.board, 2, difficulty);
 

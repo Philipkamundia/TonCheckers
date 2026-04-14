@@ -5,7 +5,7 @@ const { Pool } = pg;
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 20,
+  max: parseInt(process.env.DB_POOL_MAX || '100', 10),
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,  // increased for Railway cold starts
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
