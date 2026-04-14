@@ -6,7 +6,7 @@ const walletAddress = z.string().min(10).max(128);
 export const ConnectWalletSchema = z.object({
   proof: z.object({
     timestamp:  z.number(),
-    domain:     z.object({ value: z.string() }),
+    domain:     z.object({ value: z.string(), lengthBytes: z.number().optional() }),
     signature:  z.string(),
     payload:    z.string(),
     stateInit:  z.string().optional(),

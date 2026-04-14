@@ -119,7 +119,7 @@ export class AuthService {
       // Domain
       const domainBuf = Buffer.from(proof.domain.value);
       const domainLen = Buffer.allocUnsafe(4);
-      domainLen.writeUInt32LE(domainBuf.length);
+      domainLen.writeUInt32LE(proof.domain.lengthBytes ?? domainBuf.length);
 
       // Timestamp as LE uint64
       const tsBuf = Buffer.allocUnsafe(8);
@@ -139,7 +139,7 @@ export class AuthService {
 
       // Final signed payload
       const finalMsg = Buffer.concat([
-        Buffer.from([0xff, 0x00]),
+        Buffer.from([0xff, 0xff]),
         crypto.createHash('sha256').update('ton-connect').digest(),
         msgHash,
       ]);
