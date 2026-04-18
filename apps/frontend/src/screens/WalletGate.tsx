@@ -50,7 +50,7 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
     await doAuth(wallet, initData);
   }
 
-  async function waitForTonProof(timeoutMs = 2_500, tickMs = 150) {
+  async function waitForTonProof(timeoutMs = 5_000, tickMs = 150) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const p = latestWalletRef.current?.connectItems?.tonProof;
@@ -91,8 +91,10 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
         } catch (verifyErr: unknown) {
           const code = (verifyErr as { response?: { data?: { code?: string } } })?.response?.data?.code;
           if (code === 'USER_NOT_FOUND') {
-            // New user with no proof yet — prompt reconnect to get fresh proof
+            // New user with no proof yet — disconnect first so TonConnect fires
+            // a fresh connection event with tonProof attached on reconnect.
             setError('Please tap "Connect Wallet" again to verify wallet ownership.');
+            await tonConnectUI.disconnect();
             openWalletModal();
             haptic.error();
             setLoading(false);
@@ -111,8 +113,9 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
       const axiosErr = err as { response?: { data?: { error?: string }; status?: number } };
       const msg = axiosErr?.response?.data?.error;
       if (msg?.includes('proof') || msg?.includes('not registered')) {
-        // Proof failed or new user without proof — prompt reconnect to get fresh proof
+        // Proof failed or new user without proof — disconnect so reconnect gets fresh proof
         setError('Please disconnect and reconnect your wallet to verify ownership.');
+        await tonConnectUI.disconnect();
       } else {
         setError(msg ?? 'Connection failed. Please try again.');
       }
