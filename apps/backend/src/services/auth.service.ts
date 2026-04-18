@@ -140,9 +140,11 @@ export class AuthService {
       const msgHash = crypto.createHash('sha256').update(message).digest();
 
       // Final signed payload
+      // Per TonConnect spec: sha256( 0xffff ++ utf8("ton-connect") ++ sha256(message) )
+      // Note: "ton-connect" is included as raw UTF-8 bytes, NOT as its own sha256 hash.
       const finalMsg = Buffer.concat([
         Buffer.from([0xff, 0xff]),
-        crypto.createHash('sha256').update('ton-connect').digest(),
+        Buffer.from('ton-connect'),
         msgHash,
       ]);
       const finalHash = crypto.createHash('sha256').update(finalMsg).digest();
