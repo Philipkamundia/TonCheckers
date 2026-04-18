@@ -10,7 +10,6 @@ import { useStore } from '../store';
 import { balanceApi } from '../services/api';
 
 function toNano(ton: number): string { return Math.round(ton * 1_000_000_000).toString(); }
-
 /**
  * Encode a text comment as a valid TON Cell BOC (base64).
  * Produces the exact same output as @ton/core beginCell().storeUint(0,32).storeStringTail(text).endCell().toBoc()
@@ -54,6 +53,43 @@ function encodeTextComment(text: string): string {
 
 const MIN_DEPOSIT = 0.5;
 const PRESETS = [0.5, 1, 2, 5, 10];
+
+interface RecentTx { id: string; status: string; amount: string; createdAt: string; }
+
+function RecentDeposits({ navigate }: { navigate: (path: string) => void }) {
+  const [txs, setTxs] = useState<RecentTx[]>([]);
+  useEffect(() => {
+    balanceApi.history(1)
+      .then(r => {
+        const deposits = ((r.data.transactions ?? []) as Array<RecentTx & { type: string }>)
+          .filter(t => t.type === 'deposit')
+          .slice(0, 3);
+        setTxs(deposits);
+      })
+      .catch(() => {});
+  }, []);
+  if (!txs.length) return null;
+  const statusColor: Record<string, string> = { confirmed: '#4CAF50', processing: '#FF8F00', pending: '#2AABEE', failed: 'var(--tg-theme-destructive-text-color)' };
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <p style={{ color: 'var(--tg-theme-hint-color)', fontSize: 13, fontWeight: 600, margin: 0, textTransform: 'uppercase', letterSpacing: 0.5 }}>Recent Deposits</p>
+        <button onClick={() => navigate('/history?tab=deposits')} style={{ background: 'none', border: 'none', color: '#2AABEE', fontSize: 13, cursor: 'pointer', padding: 0 }}>View all</button>
+      </div>
+      {txs.map(tx => (
+        <div key={tx.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--tg-theme-secondary-bg-color)', borderRadius: 10, padding: '10px 12px', marginBottom: 6 }}>
+          <div>
+            <p style={{ color: 'var(--tg-theme-text-color)', fontSize: 13, fontWeight: 500, margin: 0 }}>
+              {new Date(tx.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+            </p>
+            <p style={{ color: statusColor[tx.status] ?? 'var(--tg-theme-hint-color)', fontSize: 11, margin: '2px 0 0' }}>{tx.status}</p>
+          </div>
+          <p style={{ color: '#4CAF50', fontWeight: 700, fontSize: 14, margin: 0 }}>+{parseFloat(tx.amount).toFixed(2)} TON</p>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function Deposit() {
   const { showBackButton, hideMainButton, haptic } = useTelegram();
@@ -214,6 +250,8 @@ export function Deposit() {
       <p style={s.note}>
         Your wallet will open automatically. The memo is pre-filled — just confirm and sign.
       </p>
+
+      <RecentDeposits navigate={navigate} />
     </div>
   );
 }

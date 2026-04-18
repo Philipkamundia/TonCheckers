@@ -10,12 +10,48 @@ import { useTelegram } from '../hooks/useTelegram';
 import { useStore } from '../store';
 import { balanceApi } from '../services/api';
 
+interface RecentTx { id: string; status: string; amount: string; createdAt: string; }
+
+function RecentWithdrawals({ navigate }: { navigate: (path: string) => void }) {
+  const [txs, setTxs] = useState<RecentTx[]>([]);
+  useEffect(() => {
+    balanceApi.history(1)
+      .then(r => {
+        const withdrawals = ((r.data.transactions ?? []) as Array<RecentTx & { type: string }>)
+          .filter(t => t.type === 'withdrawal')
+          .slice(0, 3);
+        setTxs(withdrawals);
+      })
+      .catch(() => {});
+  }, []);
+  if (!txs.length) return null;
+  const statusColor: Record<string, string> = { confirmed: '#4CAF50', processing: '#FF8F00', pending: '#2AABEE', failed: 'var(--tg-theme-destructive-text-color)', rejected: 'var(--tg-theme-hint-color)' };
+  return (
+    <div style={{ marginTop: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <p style={{ color: 'var(--tg-theme-hint-color)', fontSize: 13, fontWeight: 600, margin: 0, textTransform: 'uppercase', letterSpacing: 0.5 }}>Recent Withdrawals</p>
+        <button onClick={() => navigate('/history?tab=withdrawals')} style={{ background: 'none', border: 'none', color: '#2AABEE', fontSize: 13, cursor: 'pointer', padding: 0 }}>View all</button>
+      </div>
+      {txs.map(tx => (
+        <div key={tx.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--tg-theme-secondary-bg-color)', borderRadius: 10, padding: '10px 12px', marginBottom: 6 }}>
+          <div>
+            <p style={{ color: 'var(--tg-theme-text-color)', fontSize: 13, fontWeight: 500, margin: 0 }}>
+              {new Date(tx.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+            </p>
+            <p style={{ color: statusColor[tx.status] ?? 'var(--tg-theme-hint-color)', fontSize: 11, margin: '2px 0 0' }}>{tx.status}</p>
+          </div>
+          <p style={{ color: 'var(--tg-theme-text-color)', fontWeight: 700, fontSize: 14, margin: 0 }}>−{parseFloat(tx.amount).toFixed(2)} TON</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function Withdraw() {
   const { showBackButton, showMainButton, setMainButtonLoading, hideMainButton, haptic } = useTelegram();
   const { balance, setBalance, user } = useStore();
   const wallet = useTonWallet();
   const navigate = useNavigate();
-
   const [amount,    setAmount]    = useState('');
   const [result,    setResult]    = useState<{ success: boolean; message: string } | null>(null);
   const [countdown, setCountdown] = useState(0);
@@ -130,6 +166,8 @@ export function Withdraw() {
           <p style={{ color: '#C62828', margin: 0 }}>{result.message}</p>
         </div>
       )}
+
+      <RecentWithdrawals navigate={navigate} />
     </div>
   );
 }

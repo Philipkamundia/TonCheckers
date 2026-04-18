@@ -19,6 +19,7 @@ import { TournamentPostRound }      from './screens/TournamentPostRound';
 import { Leaderboard }            from './screens/Leaderboard';
 import { Deposit }                from './screens/Deposit';
 import { Withdraw }               from './screens/Withdraw';
+import { TransactionHistory }     from './screens/TransactionHistory';
 import { Profile }                from './screens/Profile';
 import { AdminDashboard }         from './screens/AdminDashboard';
 import { onGlobal }  from './hooks/useWebSocket';
@@ -224,6 +225,7 @@ function AppRoutes() {
       <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
       <Route path="/deposit"     element={<ProtectedRoute><Deposit /></ProtectedRoute>} />
       <Route path="/withdraw"    element={<ProtectedRoute><Withdraw /></ProtectedRoute>} />
+      <Route path="/history"     element={<ProtectedRoute><TransactionHistory /></ProtectedRoute>} />
       <Route path="/profile"     element={<ProtectedRoute><Profile /></ProtectedRoute>} />
       <Route path="/admin"       element={<AdminRoute><AdminDashboard /></AdminRoute>} />
 
