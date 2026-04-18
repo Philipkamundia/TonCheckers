@@ -46,8 +46,6 @@ export function TransactionHistory() {
   const [total,   setTotal]   = useState(0);
   const [loading, setLoading] = useState(false);
 
-  const LIMIT = 20;
-
   useEffect(() => { return showBackButton(() => navigate(-1)); }, []);
 
   useEffect(() => {

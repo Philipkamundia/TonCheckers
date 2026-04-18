@@ -128,7 +128,7 @@ export function WalletGate({ onConnected }: { onConnected: () => void }) {
   return (
     <div style={styles.container}>
       <div style={styles.logo}>♟️</div>
-      <h1 style={styles.title}>CheckTON</h1>
+      <h1 style={styles.title}>TonCheckers</h1>
       <p style={styles.subtitle}>Wager TON. Challenge Opponents. Climb the Ranks.</p>
 
       <div style={styles.card}>
