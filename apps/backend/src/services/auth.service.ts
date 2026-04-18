@@ -157,31 +157,64 @@ export class AuthService {
       // Extract public key from stateInit when present; otherwise use TonConnect publicKey.
       let pubKey: Buffer | null = null;
       if (proof.stateInit) {
-        const stateInitBuf = Buffer.from(proof.stateInit, 'base64');
-        if (stateInitBuf.length < 32) {
-          logger.warn(`stateInit too short (${stateInitBuf.length} bytes) for ${walletAddress}`);
-          return false;
-        }
-
-        // Try to extract public key using @ton/core Cell parsing first (most reliable)
-        // Falls back to last-32-bytes heuristic if parsing fails.
+        // Extract public key from stateInit using version-aware parsing.
+        // All standard wallet versions (v3r1, v3r2, v4, v5r1) store the pubkey
+        // in the data cell, but at different bit offsets:
+        //   v3/v4 : seqno(32) + subwallet_id(32) + pubkey(256)  → skip 64 bits
+        //   v5r1  : is_sig_allowed(1) + seqno(32) + wallet_id(32) + pubkey(256) → skip 65 bits
+        // We try each known offset in order and validate by cross-checking against
+        // proof.publicKey when available.
         try {
-          const { Cell } = await import('@ton/core');
-          const cell  = Cell.fromBoc(stateInitBuf)[0];
-          const slice = cell.beginParse();
-          slice.loadBits(2); // split_depth + special
-          slice.loadMaybeRef(); // code ref
-          const dataRef = slice.loadMaybeRef();
-          if (dataRef) {
-            const data = dataRef.beginParse();
-            data.loadUint(32); // seqno or subwallet_id
-            pubKey = Buffer.from(data.loadBuffer(32));
-          } else {
-            pubKey = stateInitBuf.slice(-32);
+          const { Cell, loadStateInit, contractAddress } = await import('@ton/core');
+          const stateInit = loadStateInit(Cell.fromBase64(proof.stateInit!).beginParse());
+
+          // Verify the stateInit actually corresponds to the claimed wallet address
+          const addr = Address.parse(walletAddress);
+          const derivedAddr = contractAddress(addr.workChain, stateInit);
+          if (!derivedAddr.equals(addr)) {
+            logger.warn(`stateInit address mismatch for ${walletAddress}`);
+            return false;
           }
-        } catch {
-          // Fallback: last 32 bytes
-          pubKey = stateInitBuf.slice(-32);
+
+          const dataRef = stateInit.data;
+          if (!dataRef) {
+            logger.warn(`No data cell in stateInit for ${walletAddress}`);
+            return false;
+          }
+
+          // Try v3/v4 layout: skip seqno(32) + subwallet_id(32) = 64 bits
+          // Try v5 layout:   skip is_sig_allowed(1) + seqno(32) + wallet_id(32) = 65 bits
+          const offsets = [64, 65, 32]; // most common first
+          let extracted: Buffer | null = null;
+          for (const skip of offsets) {
+            try {
+              const data = dataRef.beginParse();
+              data.loadBits(skip);
+              const candidate = Buffer.from(data.loadBuffer(32));
+              // Cross-check against TonConnect-provided publicKey if present
+              if (proof.publicKey) {
+                const raw = proof.publicKey.trim().replace(/^0x/i, '');
+                if (/^[0-9a-fA-F]{64}$/.test(raw)) {
+                  const expected = Buffer.from(raw, 'hex');
+                  if (candidate.equals(expected)) {
+                    extracted = candidate;
+                    break;
+                  }
+                  // This offset didn't match — try next
+                  continue;
+                }
+              }
+              // No publicKey to cross-check — use first successfully parsed candidate
+              extracted = candidate;
+              break;
+            } catch {
+              // This offset overflowed the cell — try next
+            }
+          }
+          pubKey = extracted;
+        } catch (parseErr) {
+          logger.warn(`stateInit parse failed for ${walletAddress}: ${parseErr}`);
+          pubKey = null;
         }
       } else if (proof.publicKey) {
         const raw = proof.publicKey.trim().replace(/^0x/i, '');
