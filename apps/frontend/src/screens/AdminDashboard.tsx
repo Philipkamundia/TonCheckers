@@ -255,7 +255,7 @@ function TabContent({ tab, data, onRefresh, actingTxId, actingKind, setActingTxI
   if (tab === 'withdrawals') {
     const ws = (data.withdrawals ?? []) as Array<Record<string, string>>;
     if (!ws.length) return <EmptyState icon="✅" text="No pending withdrawals" />;
-    const runAction = async (id: string, kind: 'approve' | 'reject') => {
+    const runAction = async (id: string, kind: 'approve' | 'reject', username: string, amount: string) => {
       if (actingTxId) return;
       setActionError(null);
       setActingTxId(id);
@@ -263,13 +263,15 @@ function TabContent({ tab, data, onRefresh, actingTxId, actingKind, setActingTxI
       try {
         if (kind === 'approve') {
           await api.post(`/api/admin/withdrawals/${id}/approve`);
+          setActionError(`✅ Approved — ${parseFloat(amount).toFixed(2)} TON sent to ${username}`);
         } else {
           await api.post(`/api/admin/withdrawals/${id}/reject`, { reason: 'Rejected by admin' });
+          setActionError(`↩️ Rejected — ${parseFloat(amount).toFixed(2)} TON refunded to ${username}`);
         }
         onRefresh();
       } catch (e: unknown) {
         const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
-        setActionError(msg ?? `Failed to ${kind} withdrawal`);
+        setActionError(`❌ ${msg ?? `Failed to ${kind} withdrawal`}`);
       } finally {
         setActingTxId(null);
         setActingKind(null);
@@ -277,7 +279,11 @@ function TabContent({ tab, data, onRefresh, actingTxId, actingKind, setActingTxI
     };
     return (
       <div>
-        {actionError && <p style={s.error}>{actionError}</p>}
+        {actionError && (
+          <p style={actionError.startsWith('✅') || actionError.startsWith('↩️') ? s.success : s.error}>
+            {actionError}
+          </p>
+        )}
         {ws.map(w => (
           <div key={w.id} style={s.itemCard}>
             <div style={s.itemRow}>
@@ -290,16 +296,16 @@ function TabContent({ tab, data, onRefresh, actingTxId, actingKind, setActingTxI
               <button
                 style={{ ...s.approveBtn, ...(actingTxId ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
                 disabled={Boolean(actingTxId)}
-                onClick={() => runAction(w.id, 'approve')}
+                onClick={() => runAction(w.id, 'approve', w.username, w.amount)}
               >
-                {actingTxId === w.id && actingKind === 'approve' ? 'Approving...' : '✅ Approve'}
+                {actingTxId === w.id && actingKind === 'approve' ? 'Sending…' : '✅ Approve'}
               </button>
               <button
                 style={{ ...s.rejectBtn, ...(actingTxId ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
                 disabled={Boolean(actingTxId)}
-                onClick={() => runAction(w.id, 'reject')}
+                onClick={() => runAction(w.id, 'reject', w.username, w.amount)}
               >
-                {actingTxId === w.id && actingKind === 'reject' ? 'Rejecting...' : '❌ Reject'}
+                {actingTxId === w.id && actingKind === 'reject' ? 'Rejecting…' : '❌ Reject'}
               </button>
             </div>
           </div>
@@ -441,6 +447,7 @@ const s: Record<string, React.CSSProperties> = {
   authCard:       { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:20, width:'100%', maxWidth:320, display:'flex', flexDirection:'column', gap:12 },
   primaryBtn:     { background:'#2AABEE', border:'none', borderRadius:12, padding:'14px', color:'#fff', fontSize:16, fontWeight:600, cursor:'pointer', width:'100%' },
   error:          { color:'var(--tg-theme-destructive-text-color)', fontSize:13, textAlign:'center', margin:0 },
+  success:        { color:'#4CAF50', fontSize:13, textAlign:'center', margin:'0 0 10px', fontWeight:600 },
   // passcode
   dotsRow:        { display:'flex', gap:12, margin:'8px 0' },
   dot:            { width:14, height:14, borderRadius:'50%', border:'2px solid var(--tg-theme-hint-color)', background:'transparent' },

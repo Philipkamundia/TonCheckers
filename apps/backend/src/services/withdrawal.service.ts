@@ -160,52 +160,46 @@ export class WithdrawalService {
     amount:        string,
     cooldownKey?:  string,
   ): Promise<void> {
+    // Phase 1: broadcast — if this throws, the transfer was NOT sent, safe to refund.
+    let txHash: string;
     try {
-      // Note: transaction is already status='processing' from requestWithdrawal INSERT
-      const txHash = await WithdrawalService.sendTonTransfer(destination, amount, transactionId);
+      txHash = await WithdrawalService.sendTonTransfer(destination, amount, transactionId);
+    } catch (err) {
+      try { await redis.del('withdrawal:hot_wallet_lock'); } catch {}
+      await pool.query(
+        `UPDATE transactions SET status='failed', updated_at=NOW() WHERE id=$1`,
+        [transactionId],
+      );
+      if (cooldownKey) await redis.set(cooldownKey, '1', 'EX', COOLDOWN_SECS).catch(() => {});
+      // Safe to refund — transfer never left the wallet
+      await BalanceService.creditBalance(userId, amount).catch(refundErr => {
+        logger.error(`CRITICAL: withdrawal refund failed user=${userId} amount=${amount}: ${(refundErr as Error).message}`);
+      });
+      logger.error(`Withdrawal failed (pre-send): txId=${transactionId} err=${(err as Error).message}`);
+      throw err;
+    }
 
-      // If hash is synthetic (polling exhausted), keep status as 'processing'
-      // so the recovery job will retry on-chain lookup. Do NOT refund yet.
+    // Phase 2: post-broadcast bookkeeping — transfer is already on-chain.
+    // Errors here must NEVER trigger a refund. Log and move on; recovery job handles the rest.
+    try {
       if (txHash.startsWith('pending:')) {
         await pool.query(
           `UPDATE transactions SET ton_tx_hash=$1, updated_at=NOW() WHERE id=$2`,
           [txHash, transactionId],
         );
         logger.warn(`Withdrawal broadcast but hash unconfirmed — recovery job will retry: txId=${transactionId}`);
-        // Still set cooldown — the transfer was sent
-        if (cooldownKey) await redis.set(cooldownKey, '1', 'EX', COOLDOWN_SECS);
-        return;
+      } else {
+        await pool.query(
+          `UPDATE transactions SET status='confirmed', ton_tx_hash=$1, updated_at=NOW() WHERE id=$2`,
+          [txHash, transactionId],
+        );
+        await NotificationService.send(userId, 'withdrawal_processed', { amount, txHash });
+        logger.info(`Withdrawal sent: user=${userId} amount=${amount} TON hash=${txHash}`);
       }
-
-      await pool.query(
-        `UPDATE transactions SET status='confirmed', ton_tx_hash=$1, updated_at=NOW() WHERE id=$2`,
-        [txHash, transactionId],
-      );
-
-      // Set cooldown only after successful send
-      if (cooldownKey) {
-        await redis.set(cooldownKey, '1', 'EX', COOLDOWN_SECS);
-      }
-
-      await NotificationService.send(userId, 'withdrawal_processed', { amount, txHash });
-      logger.info(`Withdrawal sent: user=${userId} amount=${amount} TON hash=${txHash}`);
-    } catch (err) {
-      // Always release the hot-wallet lock on error so the next withdrawal can proceed
-      try { await redis.del('withdrawal:hot_wallet_lock'); } catch {}
-      await pool.query(
-        `UPDATE transactions SET status='failed', updated_at=NOW() WHERE id=$1`,
-        [transactionId],
-      );
-      // M-02: Set cooldown even on failure to prevent rapid-fire retry loops
-      if (cooldownKey) {
-        await redis.set(cooldownKey, '1', 'EX', COOLDOWN_SECS).catch(() => {});
-      }
-      // Refund on failure
-      await BalanceService.creditBalance(userId, amount).catch(refundErr => {
-        logger.error(`CRITICAL: withdrawal refund failed user=${userId} amount=${amount}: ${(refundErr as Error).message}`);
-      });
-      logger.error(`Withdrawal failed: txId=${transactionId} err=${(err as Error).message}`);
-      throw err;
+      if (cooldownKey) await redis.set(cooldownKey, '1', 'EX', COOLDOWN_SECS).catch(() => {});
+    } catch (postErr) {
+      // Transfer already sent — do NOT refund. Recovery job will reconcile status.
+      logger.error(`Withdrawal post-send bookkeeping failed (transfer WAS sent): txId=${transactionId} err=${(postErr as Error).message}`);
     }
   }
 
@@ -362,17 +356,16 @@ export class WithdrawalService {
    * Admin rejection: cancel a held withdrawal and return funds.
    */
   static async rejectWithdrawal(transactionId: string, reason: string): Promise<void> {
+    // Atomically claim the transaction by flipping status pending → rejected.
+    // Prevents duplicate credits if reject is called more than once.
     const { rows: [tx] } = await pool.query(
-      `SELECT id, user_id, amount::text FROM transactions
-       WHERE id=$1 AND requires_review=true AND status='pending'`,
-      [transactionId],
-    );
-    if (!tx) throw new AppError(404, 'Pending withdrawal not found', 'NOT_FOUND');
-
-    await pool.query(
-      `UPDATE transactions SET status='rejected', admin_note=$1, updated_at=NOW() WHERE id=$2`,
+      `UPDATE transactions
+          SET status='rejected', admin_note=$1, updated_at=NOW()
+        WHERE id=$2 AND requires_review=true AND status='pending'
+        RETURNING id, user_id, amount::text`,
       [reason, transactionId],
     );
+    if (!tx) throw new AppError(404, 'Pending withdrawal not found (already processed or does not exist)', 'NOT_FOUND');
 
     await BalanceService.creditBalance(tx.user_id, tx.amount);
     logger.info(`Admin rejected withdrawal: txId=${transactionId} reason=${reason}`);
