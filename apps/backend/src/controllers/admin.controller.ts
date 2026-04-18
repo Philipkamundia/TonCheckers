@@ -122,11 +122,20 @@ export const adminController = {
   triggerReconciliation: async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const { runReconciliation } = await import('../jobs/balanceReconciliation.js');
-      // Fire-and-forget — don't await so HTTP response is immediate
       runReconciliation().catch(err =>
         console.error('On-demand reconciliation error:', (err as Error).message),
       );
       res.json({ ok: true, message: 'Reconciliation triggered — results will appear in logs and /admin/reconciliation' });
+    } catch (err) { next(err); }
+  },
+
+  triggerWithdrawalRecovery: async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { runWithdrawalRecovery } = await import('../jobs/withdrawalRecovery.js');
+      runWithdrawalRecovery().catch(err =>
+        console.error('On-demand withdrawal recovery error:', (err as Error).message),
+      );
+      res.json({ ok: true, message: 'Withdrawal recovery triggered — failed/stuck transactions will be reconciled against the chain' });
     } catch (err) { next(err); }
   },
 };

@@ -22,18 +22,31 @@ export function startWithdrawalRecoveryJob(): ReturnType<typeof setInterval> {
   return setInterval(recoverStuckWithdrawals, POLL_INTERVAL_MS);
 }
 
+/** Exported for on-demand admin trigger */
+export async function runWithdrawalRecovery(): Promise<void> {
+  return recoverStuckWithdrawals();
+}
+
 async function recoverStuckWithdrawals(): Promise<void> {
   try {
+    // Recover both 'processing' (stuck) and 'failed' transactions that have a
+    // hot_wallet_seqno — seqno presence means sendTonTransfer was called and the
+    // transfer was broadcast before the failure/timeout occurred.
     const { rows } = await pool.query<{
       id: string; user_id: string; amount: string; destination: string;
-      ton_tx_hash: string | null; hot_wallet_seqno: number | null; updated_at: Date;
+      ton_tx_hash: string | null; hot_wallet_seqno: number | null; updated_at: Date; status: string;
     }>(
-      `SELECT id, user_id, amount::text, destination, ton_tx_hash, hot_wallet_seqno, updated_at
+      `SELECT id, user_id, amount::text, destination, ton_tx_hash, hot_wallet_seqno, updated_at, status
        FROM transactions
-       WHERE type        = 'withdrawal'
-         AND status      = 'processing'
+       WHERE type = 'withdrawal'
          AND refunded_at IS NULL
-         AND updated_at  < NOW() - INTERVAL '${STUCK_THRESHOLD_MINS} minutes'`,
+         AND (
+           -- Stuck in processing for > 10 min
+           (status = 'processing' AND updated_at < NOW() - INTERVAL '${STUCK_THRESHOLD_MINS} minutes')
+           OR
+           -- Marked failed but seqno exists — transfer was broadcast before the error
+           (status = 'failed' AND hot_wallet_seqno IS NOT NULL)
+         )`,
     );
 
     if (!rows.length) return;
@@ -49,13 +62,14 @@ async function recoverStuckWithdrawals(): Promise<void> {
 
 async function recoverTransaction(tx: {
   id: string; user_id: string; amount: string; destination: string;
-  ton_tx_hash: string | null; hot_wallet_seqno: number | null; updated_at: Date;
+  ton_tx_hash: string | null; hot_wallet_seqno: number | null; updated_at: Date; status: string;
 }): Promise<void> {
   try {
-    // If we have a real on-chain hash (not synthetic), mark as confirmed — no refund needed
+    // If we have a real on-chain hash (not synthetic), mark as confirmed immediately
     if (tx.ton_tx_hash && !tx.ton_tx_hash.startsWith('pending:') && !tx.ton_tx_hash.startsWith('sent:')) {
       await pool.query(
-        `UPDATE transactions SET status='confirmed', updated_at=NOW() WHERE id=$1 AND status='processing'`,
+        `UPDATE transactions SET status='confirmed', updated_at=NOW()
+         WHERE id=$1 AND status IN ('processing','failed')`,
         [tx.id],
       );
       logger.info(`Withdrawal recovery: confirmed tx=${tx.id} hash=${tx.ton_tx_hash}`);
@@ -81,10 +95,10 @@ async function recoverTransaction(tx: {
     if (onChain.hash) {
       await pool.query(
         `UPDATE transactions SET status='confirmed', ton_tx_hash=$1, updated_at=NOW()
-         WHERE id=$2 AND status='processing'`,
+         WHERE id=$2 AND status IN ('processing','failed')`,
         [onChain.hash, tx.id],
       );
-      logger.info(`Withdrawal recovery: found on-chain tx=${tx.id} hash=${onChain.hash}`);
+      logger.info(`Withdrawal recovery: found on-chain tx=${tx.id} hash=${onChain.hash} (was ${tx.status})`);
       return;
     }
 
@@ -133,42 +147,48 @@ async function checkOnChain(
       ? 'https://toncenter.com/api/v2'
       : 'https://testnet.toncenter.com/api/v2';
 
-    // N-04: Fetch 100 transactions to avoid missing the tx if many withdrawals occurred
-    const url = `${base}/getTransactions?address=${hotWallet}&limit=100${apiKey ? `&api_key=${apiKey}` : ''}`;
-    const res  = await fetch(url);
-    if (!res.ok) return { hash: null, queried: false };
-
-    const data = await res.json() as { ok: boolean; result: Array<Record<string, unknown>> };
-    if (!data.ok) return { hash: null, queried: false };
-
     const expectedNano = Math.round(parseFloat(amount) * 1e9);
 
-    for (const item of data.result) {
-      const txId    = item.transaction_id as Record<string, unknown> | undefined;
-      const txHash  = String(txId?.hash ?? (item as Record<string, unknown>).hash ?? '');
-      const outMsgs = (item.out_msgs as Array<Record<string, unknown>>) ?? [];
+    // Fetch up to 3 pages of 100 txs (300 total) to cover high-volume wallets.
+    // Stop early if we find a match.
+    let lastLt: string | undefined;
+    for (let page = 0; page < 3; page++) {
+      const ltParam = lastLt ? `&lt=${lastLt}&hash=` : '';
+      const url = `${base}/getTransactions?address=${hotWallet}&limit=100${ltParam}${apiKey ? `&api_key=${apiKey}` : ''}`;
+      const res  = await fetch(url);
+      if (!res.ok) return { hash: null, queried: false };
 
-      for (const msg of outMsgs) {
-        const dest  = String(msg.destination || '');
-        const value = Number(msg.value || 0);
-        const amountMatch =
-          dest.toLowerCase() === destination.toLowerCase() &&
-          Math.abs(value - expectedNano) < 10_000; // M-03: tight tolerance
+      const data = await res.json() as { ok: boolean; result: Array<Record<string, unknown>> };
+      if (!data.ok || !data.result.length) break;
 
-        // H-06: When seqno is known, require it to be encoded in the synthetic hash
-        // (format: pending:{hotAddr}:seq{seqno}:{ts}) for an unambiguous match.
-        if (seqno !== undefined && amountMatch) {
-          // The seqno ties this specific broadcast to this specific tx record.
-          // A matching (dest + amount + seqno) triple is unambiguous.
-          return { hash: txHash, queried: true };
-        }
+      for (const item of data.result) {
+        const txId    = item.transaction_id as Record<string, unknown> | undefined;
+        const txHash  = String(txId?.hash ?? (item as Record<string, unknown>).hash ?? '');
+        const outMsgs = (item.out_msgs as Array<Record<string, unknown>>) ?? [];
 
-        // Fallback: amount + destination only (used when seqno not yet stored)
-        if (amountMatch) {
-          return { hash: txHash, queried: true };
+        for (const msg of outMsgs) {
+          const dest  = String(msg.destination || '');
+          const value = Number(msg.value || 0);
+          const amountMatch =
+            dest.toLowerCase() === destination.toLowerCase() &&
+            Math.abs(value - expectedNano) < 10_000;
+
+          if (seqno !== undefined && amountMatch) {
+            return { hash: txHash, queried: true };
+          }
+          if (amountMatch) {
+            return { hash: txHash, queried: true };
+          }
         }
       }
+
+      // Advance cursor for next page using the lt of the last item
+      const last = data.result[data.result.length - 1];
+      const lastTxId = last?.transaction_id as Record<string, unknown> | undefined;
+      lastLt = String(lastTxId?.lt ?? '');
+      if (!lastLt) break;
     }
+
     return { hash: null, queried: true };
   } catch {
     return { hash: null, queried: false };

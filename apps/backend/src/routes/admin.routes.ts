@@ -63,3 +63,4 @@ adminRouter.get('/crashes',                    adminController.getCrashLog);
 // Balance reconciliation
 adminRouter.get('/reconciliation', adminController.getReconciliationHistory);
 adminRouter.post('/reconciliation/run', adminController.triggerReconciliation);
+adminRouter.post('/withdrawal-recovery/run', adminController.triggerWithdrawalRecovery);
