@@ -262,7 +262,9 @@ function TabContent({ tab, data, onRefresh, actingTxId, actingKind, setActingTxI
       setActingKind(kind);
       try {
         if (kind === 'approve') {
-          await api.post(`/api/admin/withdrawals/${id}/approve`);
+          // Approval broadcasts a TON transfer and polls for the hash — can take up to 25s.
+          // Use a per-request timeout well above the polling window.
+          await api.post(`/api/admin/withdrawals/${id}/approve`, {}, { timeout: 60_000 });
           setActionError(`✅ Approved — ${parseFloat(amount).toFixed(2)} TON sent to ${username}`);
         } else {
           await api.post(`/api/admin/withdrawals/${id}/reject`, { reason: 'Rejected by admin' });
