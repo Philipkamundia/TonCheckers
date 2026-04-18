@@ -229,7 +229,7 @@ export function AdminDashboard() {
 }
 
 // ── Tab content ──────────────────────────────────────────────────────────────
-function TabContent({ tab, data, onRefresh, actingTxId, actingKind, setActingTxId, setActingKind }: {
+function TabContent({ tab, data, onRefresh, actingTxId, setActingTxId, setActingKind }: {
   tab: AdminTab;
   data: Record<string, unknown>;
   onRefresh: () => void;
@@ -238,7 +238,8 @@ function TabContent({ tab, data, onRefresh, actingTxId, actingKind, setActingTxI
   setActingTxId: (id: string | null) => void;
   setActingKind: (kind: 'approve' | 'reject' | null) => void;
 }) {
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [banner,    setBanner]    = useState<{ text: string; ok: boolean } | null>(null);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   if (tab === 'treasury' && data.treasury) {
     const t = data.treasury as Record<string, string | null>;
@@ -253,65 +254,75 @@ function TabContent({ tab, data, onRefresh, actingTxId, actingKind, setActingTxI
   }
 
   if (tab === 'withdrawals') {
-    const ws = (data.withdrawals ?? []) as Array<Record<string, string>>;
-    if (!ws.length) return <EmptyState icon="✅" text="No pending withdrawals" />;
+    const allWs = (data.withdrawals ?? []) as Array<Record<string, string>>;
+    const ws = allWs.filter(w => !dismissed.has(w.id));
+
     const runAction = async (id: string, kind: 'approve' | 'reject', username: string, amount: string) => {
       if (actingTxId) return;
-      setActionError(null);
+      setBanner(null);
       setActingTxId(id);
       setActingKind(kind);
+      // Immediately remove from list — optimistic update
+      setDismissed(prev => new Set(prev).add(id));
+      if (kind === 'approve') {
+        setBanner({ text: `⏳ Sending ${parseFloat(amount).toFixed(2)} TON to ${username}…`, ok: true });
+      }
       try {
         if (kind === 'approve') {
-          // Approval broadcasts a TON transfer and polls for the hash — can take up to 25s.
-          // Use a per-request timeout well above the polling window.
           await api.post(`/api/admin/withdrawals/${id}/approve`, {}, { timeout: 60_000 });
-          setActionError(`✅ Approved — ${parseFloat(amount).toFixed(2)} TON sent to ${username}`);
+          setBanner({ text: `✅ Sent — ${parseFloat(amount).toFixed(2)} TON to ${username}`, ok: true });
         } else {
           await api.post(`/api/admin/withdrawals/${id}/reject`, { reason: 'Rejected by admin' });
-          setActionError(`↩️ Rejected — ${parseFloat(amount).toFixed(2)} TON refunded to ${username}`);
+          setBanner({ text: `↩️ Rejected — ${parseFloat(amount).toFixed(2)} TON refunded to ${username}`, ok: true });
         }
         onRefresh();
       } catch (e: unknown) {
+        // Restore item on failure
+        setDismissed(prev => { const n = new Set(prev); n.delete(id); return n; });
         const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
-        setActionError(`❌ ${msg ?? `Failed to ${kind} withdrawal`}`);
+        setBanner({ text: `❌ ${msg ?? `Failed to ${kind} withdrawal`}`, ok: false });
       } finally {
         setActingTxId(null);
         setActingKind(null);
       }
     };
+
     return (
       <div>
-        {actionError && (
-          <p style={actionError.startsWith('✅') || actionError.startsWith('↩️') ? s.success : s.error}>
-            {actionError}
-          </p>
-        )}
-        {ws.map(w => (
-          <div key={w.id} style={s.itemCard}>
-            <div style={s.itemRow}>
-              <span style={s.itemTitle}>{w.username}</span>
-              <span style={s.itemAmount}>{parseFloat(w.amount).toFixed(2)} TON</span>
-            </div>
-            <p style={s.itemSub}>{w.destination}</p>
-            <p style={s.itemSub}>{new Date(w.created_at).toLocaleString()}</p>
-            <div style={s.btnRow}>
-              <button
-                style={{ ...s.approveBtn, ...(actingTxId ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
-                disabled={Boolean(actingTxId)}
-                onClick={() => runAction(w.id, 'approve', w.username, w.amount)}
-              >
-                {actingTxId === w.id && actingKind === 'approve' ? 'Sending…' : '✅ Approve'}
-              </button>
-              <button
-                style={{ ...s.rejectBtn, ...(actingTxId ? { opacity: 0.6, cursor: 'not-allowed' } : {}) }}
-                disabled={Boolean(actingTxId)}
-                onClick={() => runAction(w.id, 'reject', w.username, w.amount)}
-              >
-                {actingTxId === w.id && actingKind === 'reject' ? 'Rejecting…' : '❌ Reject'}
-              </button>
-            </div>
+        {banner && (
+          <div style={{ ...s.banner, ...(banner.ok ? s.bannerOk : s.bannerErr) }}>
+            {banner.text}
           </div>
-        ))}
+        )}
+        {ws.length === 0 && !actingTxId
+          ? <EmptyState icon="✅" text="No pending withdrawals" />
+          : ws.map(w => (
+            <div key={w.id} style={s.itemCard}>
+              <div style={s.itemRow}>
+                <span style={s.itemTitle}>{w.username}</span>
+                <span style={s.itemAmount}>{parseFloat(w.amount).toFixed(2)} TON</span>
+              </div>
+              <p style={s.itemSub}>{w.destination}</p>
+              <p style={s.itemSub}>{new Date(w.created_at).toLocaleString()}</p>
+              <div style={s.btnRow}>
+                <button
+                  style={{ ...s.approveBtn, ...(actingTxId ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}
+                  disabled={Boolean(actingTxId)}
+                  onClick={() => runAction(w.id, 'approve', w.username, w.amount)}
+                >
+                  ✅ Approve
+                </button>
+                <button
+                  style={{ ...s.rejectBtn, ...(actingTxId ? { opacity: 0.5, cursor: 'not-allowed' } : {}) }}
+                  disabled={Boolean(actingTxId)}
+                  onClick={() => runAction(w.id, 'reject', w.username, w.amount)}
+                >
+                  ❌ Reject
+                </button>
+              </div>
+            </div>
+          ))
+        }
       </div>
     );
   }
@@ -449,7 +460,9 @@ const s: Record<string, React.CSSProperties> = {
   authCard:       { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:20, width:'100%', maxWidth:320, display:'flex', flexDirection:'column', gap:12 },
   primaryBtn:     { background:'#2AABEE', border:'none', borderRadius:12, padding:'14px', color:'#fff', fontSize:16, fontWeight:600, cursor:'pointer', width:'100%' },
   error:          { color:'var(--tg-theme-destructive-text-color)', fontSize:13, textAlign:'center', margin:0 },
-  success:        { color:'#4CAF50', fontSize:13, textAlign:'center', margin:'0 0 10px', fontWeight:600 },
+  banner:         { borderRadius:10, padding:'12px 14px', marginBottom:12, fontSize:13, fontWeight:600, textAlign:'center' as const },
+  bannerOk:       { background:'rgba(76,175,80,0.15)', color:'#4CAF50', border:'1px solid rgba(76,175,80,0.3)' },
+  bannerErr:      { background:'rgba(229,57,53,0.1)',  color:'#E53935', border:'1px solid rgba(229,57,53,0.3)' },
   // passcode
   dotsRow:        { display:'flex', gap:12, margin:'8px 0' },
   dot:            { width:14, height:14, borderRadius:'50%', border:'2px solid var(--tg-theme-hint-color)', background:'transparent' },
