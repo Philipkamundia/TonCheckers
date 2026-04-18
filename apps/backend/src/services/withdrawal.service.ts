@@ -84,25 +84,31 @@ export class WithdrawalService {
     const dailyKey = `${DAILY_PREFIX}${userId}:${utcDate}`;
     const secsUntilMidnightForLimit = WithdrawalService.secsUntilUtcMidnight();
 
-    // requiresReview routes to admin queue but still counts against the daily total
+    // requiresReview routes to admin queue but still counts against the daily total.
+    // Both paths increment the counter here — before balance deduction — so the
+    // rollback path is symmetric: decrement counter then rethrow.
     const requiresReview = amountNum >= MAX_DAILY_TON;
 
-    if (!requiresReview) {
-      // Atomically increment — if the result exceeds the limit, roll back immediately
-      const newDailyTotalRaw = await redis.incrbyfloat(dailyKey, amountNum);
-      const newDailyTotal = Number(newDailyTotalRaw);
-      await redis.expire(dailyKey, secsUntilMidnightForLimit);
-      if (newDailyTotal > MAX_DAILY_TON) {
-        // Roll back the increment
-        await redis.incrbyfloat(dailyKey, -amountNum);
-        const used = newDailyTotal - amountNum;
-        const remaining = Math.max(0, MAX_DAILY_TON - used);
-        throw new AppError(400, `Daily limit reached. You can withdraw up to ${remaining.toFixed(2)} TON today.`, 'DAILY_LIMIT_EXCEEDED');
-      }
+    const newDailyTotalRaw = await redis.incrbyfloat(dailyKey, amountNum);
+    const newDailyTotal = Number(newDailyTotalRaw);
+    await redis.expire(dailyKey, secsUntilMidnightForLimit);
+
+    if (!requiresReview && newDailyTotal > MAX_DAILY_TON) {
+      // Roll back the increment and reject
+      await redis.incrbyfloat(dailyKey, -amountNum);
+      const used = newDailyTotal - amountNum;
+      const remaining = Math.max(0, MAX_DAILY_TON - used);
+      throw new AppError(400, `Daily limit reached. You can withdraw up to ${remaining.toFixed(2)} TON today.`, 'DAILY_LIMIT_EXCEEDED');
     }
 
     // 4. Balance check + immediate deduction
-    await BalanceService.deductBalance(userId, amount); // throws if insufficient
+    try {
+      await BalanceService.deductBalance(userId, amount); // throws if insufficient
+    } catch (err) {
+      // Roll back the daily counter increment before rethrowing
+      await redis.incrbyfloat(dailyKey, -amountNum).catch(() => {});
+      throw err;
+    }
 
     // 5. Create transaction record
     const client = await pool.connect();
@@ -120,20 +126,14 @@ export class WithdrawalService {
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
-      // Refund the balance deduction on DB failure
+      // Refund the balance deduction and daily counter on DB failure
       await BalanceService.creditBalance(userId, amount);
+      await redis.incrbyfloat(dailyKey, -amountNum).catch(() => {});
       throw err;
     } finally {
       client.release();
     }
 
-    // 6. For review-required withdrawals, update daily total separately.
-    // Non-review withdrawals already updated the daily counter atomically in step 3.
-    if (requiresReview) {
-      const secsUntilMidnight = WithdrawalService.secsUntilUtcMidnight();
-      await redis.incrbyfloat(dailyKey, amountNum);
-      await redis.expire(dailyKey, secsUntilMidnight);
-    }
 
     // Cooldown set only after successful on-chain send (inside processWithdrawal)
 
@@ -340,19 +340,17 @@ export class WithdrawalService {
    * Called from admin dashboard (Phase 12).
    */
   static async approveWithdrawal(transactionId: string, adminNote?: string): Promise<void> {
+    // Atomically claim the transaction by flipping status pending → processing.
+    // This is the single idempotency gate — concurrent or duplicate approve calls
+    // will find status != 'pending' and get a 404, preventing double-sends.
     const { rows: [tx] } = await pool.query(
-      `SELECT id, user_id, amount::text, destination FROM transactions
-       WHERE id=$1 AND requires_review=true AND status='pending'`,
-      [transactionId],
+      `UPDATE transactions
+          SET status='processing', admin_note=COALESCE($1, admin_note), updated_at=NOW()
+        WHERE id=$2 AND requires_review=true AND status='pending'
+        RETURNING id, user_id, amount::text, destination`,
+      [adminNote ?? null, transactionId],
     );
-    if (!tx) throw new AppError(404, 'Pending withdrawal not found', 'NOT_FOUND');
-
-    if (adminNote) {
-      await pool.query(
-        `UPDATE transactions SET admin_note=$1, updated_at=NOW() WHERE id=$2`,
-        [adminNote, transactionId],
-      );
-    }
+    if (!tx) throw new AppError(404, 'Pending withdrawal not found (already processed or does not exist)', 'NOT_FOUND');
 
     // Set cooldown after successful processing (passed into processWithdrawal)
     const cooldownKey = `${COOLDOWN_PREFIX}${tx.user_id}`;

@@ -83,14 +83,14 @@ export async function runReconciliation(): Promise<void> {
       SELECT
         COALESCE(SUM(CASE WHEN type = 'deposit'    AND status = 'confirmed'
                           THEN amount ELSE 0 END), 0)::text AS total_deposits,
-        COALESCE(SUM(CASE WHEN type = 'withdrawal' AND status IN ('confirmed', 'processing')
+        COALESCE(SUM(CASE WHEN type = 'withdrawal' AND status IN ('confirmed', 'processing', 'pending')
                           THEN amount ELSE 0 END), 0)::text AS total_withdrawals,
         -- Game wins credited as 'deposit' type transactions (see settlement.service.ts)
         -- so they're already included in total_deposits above.
         '0'::text AS total_game_wins,
         COALESCE(SUM(CASE WHEN type = 'deposit'    AND status = 'confirmed'
                           THEN amount ELSE 0 END)
-               - SUM(CASE WHEN type = 'withdrawal' AND status IN ('confirmed', 'processing')
+               - SUM(CASE WHEN type = 'withdrawal' AND status IN ('confirmed', 'processing', 'pending')
                           THEN amount ELSE 0 END)
                , 0)::text AS expected_balance
       FROM transactions

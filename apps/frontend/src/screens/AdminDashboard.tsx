@@ -41,6 +41,9 @@ export function AdminDashboard() {
   const [summary,   setSummary]   = useState<Record<string, number> | null>(null);
   const [data,      setData]      = useState<Record<string, unknown> | null>(null);
   const [loading,   setLoading]   = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [actingTxId, setActingTxId] = useState<string | null>(null);
+  const [actingKind, setActingKind] = useState<'approve' | 'reject' | null>(null);
 
   const authed = step === 'dashboard';
 
@@ -104,10 +107,11 @@ export function AdminDashboard() {
       .then(r => setData(r.data))
       .catch(() => setData({ error: 'Failed to load' }))
       .finally(() => setLoading(false));
-  }, [tab, authed]);
+  }, [tab, authed, refreshKey]);
 
   function openTab(t: AdminTab) {
     setTab(t);
+    setRefreshKey(k => k + 1);
     haptic.selection();
   }
 
@@ -171,11 +175,11 @@ export function AdminDashboard() {
       <div style={s.container}>
         <div style={s.topBar}>
           <p style={s.greeting}>{current?.emoji} {current?.label}</p>
-          <button style={s.refreshBtn} onClick={() => openTab(tab)}>↻ Refresh</button>
+          <button style={s.refreshBtn} onClick={() => setRefreshKey(k => k + 1)}>↻ Refresh</button>
         </div>
         <div style={s.content}>
           {loading && <p style={s.hint}>Loading…</p>}
-          {!loading && data && <TabContent tab={tab} data={data} onRefresh={() => openTab(tab)} />}
+          {!loading && data && <TabContent tab={tab} data={data} onRefresh={() => setRefreshKey(k => k + 1)} actingTxId={actingTxId} actingKind={actingKind} setActingTxId={setActingTxId} setActingKind={setActingKind} />}
         </div>
       </div>
     );
@@ -225,9 +229,15 @@ export function AdminDashboard() {
 }
 
 // ── Tab content ──────────────────────────────────────────────────────────────
-function TabContent({ tab, data, onRefresh }: { tab: AdminTab; data: Record<string, unknown>; onRefresh: () => void }) {
-  const [actingTxId, setActingTxId] = useState<string | null>(null);
-  const [actingKind, setActingKind] = useState<'approve' | 'reject' | null>(null);
+function TabContent({ tab, data, onRefresh, actingTxId, actingKind, setActingTxId, setActingKind }: {
+  tab: AdminTab;
+  data: Record<string, unknown>;
+  onRefresh: () => void;
+  actingTxId: string | null;
+  actingKind: 'approve' | 'reject' | null;
+  setActingTxId: (id: string | null) => void;
+  setActingKind: (kind: 'approve' | 'reject' | null) => void;
+}) {
   const [actionError, setActionError] = useState<string | null>(null);
 
   if (tab === 'treasury' && data.treasury) {
