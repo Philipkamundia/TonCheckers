@@ -31,13 +31,14 @@ function getForwardDirections(square: Square): Array<[number, number]> {
 
 /**
  * Get all simple (non-capture) moves for a piece at (row, col).
- * Flying kings: slide any number of squares diagonally.
+ * Kings move one square in any of the 4 diagonal directions.
+ * Regular pieces move one step forward only.
  */
 function getSimpleMoves(board: Board, row: number, col: number): Move[] {
   const square = board[row][col];
   const moves: Move[] = [];
 
-  // Kings move one square in all 4 directions (no flying for simple moves)
+  // Kings move one square in all 4 directions
   // Regular pieces move one step forward only
   const dirs = isKing(square) ? ALL_DIRECTIONS : getForwardDirections(square);
 

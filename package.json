@@ -1,35 +1,43 @@
 {
-  "name": "ton-checkers-monorepo",
+  "name": "@checkton/test-suite",
   "private": true,
   "version": "1.0.0",
+  "description": "Comprehensive automated test suite for TonCheckers",
   "type": "module",
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
   "scripts": {
-    "start": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:frontend": "npm run dev --workspace=apps/frontend",
-    "dev:backend": "npm run dev --workspace=apps/backend",
-    "build": "npm run build:frontend && npm run build:backend",
-    "build:frontend": "npm run build --workspace=apps/frontend",
-    "build:backend": "npm run build --workspace=apps/backend",
-    "preview": "vite preview",
-    "lint": "npm run lint --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "clean": "npm run clean --workspaces --if-present && rimraf node_modules",
-    "install:all": "npm install && npm install --workspaces"
-  },
-  "overrides": {
-    "rollup": "^4.29.0"
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:e2e": "vitest run --project e2e",
+    "test:chaos": "vitest run tests/load/",
+    "test:watch": "vitest --project unit",
+    "test:coverage": "vitest run --coverage",
+    "test:ci": "vitest run --coverage --reporter=verbose"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
-    "rimraf": "^5.0.1",
-    "typescript": "^5.0.2"
-  },
-  "dependencies": {
-    "@telegram-apps/analytics": "^1.6.4"
+    "@sentry/node": "^10.49.0",
+    "@ton/core": "^0.63.1",
+    "@ton/crypto": "^3.3.0",
+    "@ton/ton": "^16.2.4",
+    "@tonconnect/sdk": "^3.4.1",
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^1.6.1",
+    "axios": "^1.15.0",
+    "compression": "^1.8.1",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2",
+    "helmet": "^8.1.0",
+    "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.1",
+    "node-cron": "^4.2.1",
+    "pg": "^8.20.0",
+    "rate-limit-redis": "^4.3.1",
+    "socket.io": "^4.8.3",
+    "typescript": "^5.0.0",
+    "vitest": "^1.6.0",
+    "winston": "^3.19.0",
+    "zod": "^4.3.6"
   }
 }

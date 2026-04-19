@@ -15,7 +15,7 @@ export const withdrawalController = {
     try {
       const parsed = WithdrawSchema.safeParse(req.body);
       if (!parsed.success) {
-        return next(new AppError(400, parsed.error.errors[0].message, 'VALIDATION_ERROR'));
+        return next(new AppError(400, parsed.error?.errors?.[0]?.message ?? 'Validation error', 'VALIDATION_ERROR'));
       }
 
       const { amount, destination } = parsed.data;

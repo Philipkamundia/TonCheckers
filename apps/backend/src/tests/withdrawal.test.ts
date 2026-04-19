@@ -212,8 +212,8 @@ describe('requestWithdrawal — success path', () => {
     const result = await WithdrawalService.requestWithdrawal(USER_ID, '5', WALLET);
     expect(result.requiresReview).toBe(false);
     expect(result.transactionId).toBe(TX_ID);
-    // processWithdrawal runs asynchronously — wait a tick so any sync errors surface
-    await new Promise(r => setTimeout(r, 0));
+    // processWithdrawal runs asynchronously — flush microtasks so any sync errors surface
+    await Promise.resolve();
   });
 
   it('does NOT set cooldown for review-required withdrawals', async () => {

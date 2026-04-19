@@ -1,0 +1,240 @@
+name: TonCheckers CI
+
+on:
+  push:
+    branches: [main, develop, 'feature/**', 'fix/**']
+  pull_request:
+    branches: [main, develop]
+
+env:
+  NODE_VERSION: '20'
+  # Test-only secrets — never real values
+  JWT_SECRET: 'ci-test-jwt-secret-32-chars-min!!'
+  JWT_REFRESH_SECRET: 'ci-test-refresh-secret-32chars!!'
+  TELEGRAM_BOT_TOKEN: 'ci:test_bot_token_for_hmac_only'
+  HOT_WALLET_ADDRESS: 'EQDCITestWalletAddressForTestingOnly000000000000000001'
+  MIN_STAKE_TON: '0.1'
+  MAX_DAILY_WITHDRAWAL_TON: '100'
+  NODE_ENV: 'test'
+
+jobs:
+  # ─── Lint ───────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci --workspace=apps/backend
+      - run: npm run lint --workspace=apps/backend
+
+  # ─── Unit tests ─────────────────────────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests with coverage
+        working-directory: test-suite
+        run: |
+          npx vitest run --project unit \
+            --coverage \
+            --coverage.reporter=text \
+            --coverage.reporter=lcov
+        env:
+          JWT_SECRET: ${{ env.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ env.JWT_REFRESH_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ env.TELEGRAM_BOT_TOKEN }}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: ./test-suite/coverage/lcov.info
+          flags: unit
+          fail_ci_if_error: false
+
+      - name: Enforce coverage thresholds
+        working-directory: test-suite
+        run: |
+          npx vitest run --project unit --coverage --coverage.thresholds.statements=90
+        env:
+          JWT_SECRET: ${{ env.JWT_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ env.TELEGRAM_BOT_TOKEN }}
+
+  # ─── Integration tests ───────────────────────────────────────────────────────
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: toncheckers_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run migrations on test DB
+        working-directory: apps/backend
+        run: npm run migrate
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/toncheckers_test
+
+      - name: Run integration tests
+        working-directory: test-suite
+        run: npx vitest run --project integration
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/toncheckers_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ${{ env.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ env.JWT_REFRESH_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ env.TELEGRAM_BOT_TOKEN }}
+
+  # ─── E2E tests ───────────────────────────────────────────────────────────────
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: integration-tests
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: toncheckers_e2e
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run migrations
+        working-directory: apps/backend
+        run: npm run migrate
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/toncheckers_e2e
+
+      - name: Run E2E tests
+        working-directory: test-suite
+        run: npx vitest run --project e2e
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/toncheckers_e2e
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: ${{ env.JWT_SECRET }}
+          JWT_REFRESH_SECRET: ${{ env.JWT_REFRESH_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ env.TELEGRAM_BOT_TOKEN }}
+
+  # ─── Chaos / load tests ──────────────────────────────────────────────────────
+  chaos-tests:
+    name: Chaos & Load Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests  # can run in parallel with integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Run chaos tests
+        working-directory: test-suite
+        run: npx vitest run tests/load/
+        env:
+          JWT_SECRET: ${{ env.JWT_SECRET }}
+          TELEGRAM_BOT_TOKEN: ${{ env.TELEGRAM_BOT_TOKEN }}
+
+  # ─── Security scan ───────────────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Audit dependencies for known CVEs
+        run: npm audit --audit-level=high
+
+      - name: Check for hardcoded secrets (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─── Final gate ──────────────────────────────────────────────────────────────
+  all-tests-pass:
+    name: All Tests Pass ✅
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests, e2e-tests, chaos-tests, security]
+    if: always()
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [ "${{ needs.unit-tests.result }}" != "success" ] || \
+             [ "${{ needs.integration-tests.result }}" != "success" ] || \
+             [ "${{ needs.e2e-tests.result }}" != "success" ] || \
+             [ "${{ needs.chaos-tests.result }}" != "success" ]; then
+            echo "❌ One or more test stages failed."
+            exit 1
+          fi
+          echo "✅ All test stages passed."

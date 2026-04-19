@@ -17,7 +17,7 @@ export function makeTournamentController(io: Server) {
     async create(req: Request, res: Response, next: NextFunction) {
       try {
         const parsed = CreateSchema.safeParse(req.body);
-        if (!parsed.success) return next(new AppError(400, parsed.error.errors[0].message, 'VALIDATION_ERROR'));
+        if (!parsed.success) return next(new AppError(400, parsed.error?.errors?.[0]?.message ?? 'Validation error', 'VALIDATION_ERROR'));
         const t = await TournamentService.createTournament(
           req.user!.userId, parsed.data.name, parsed.data.bracketSize,
           parsed.data.entryFee, parsed.data.startsAt,

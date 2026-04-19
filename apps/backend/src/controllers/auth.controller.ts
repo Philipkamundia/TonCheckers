@@ -14,7 +14,7 @@ export const authController = {
     try {
       const parsed = ConnectWalletSchema.safeParse(req.body);
       if (!parsed.success) {
-        return next(new AppError(400, parsed.error.errors[0].message, 'VALIDATION_ERROR'));
+        return next(new AppError(400, parsed.error?.errors?.[0]?.message ?? 'Validation error', 'VALIDATION_ERROR'));
       }
 
       const { walletAddress, proof, initData } = parsed.data;
@@ -40,7 +40,7 @@ export const authController = {
     try {
       const parsed = VerifyInitDataSchema.safeParse(req.body);
       if (!parsed.success) {
-        return next(new AppError(400, parsed.error.errors[0].message, 'VALIDATION_ERROR'));
+        return next(new AppError(400, parsed.error?.errors?.[0]?.message ?? 'Validation error', 'VALIDATION_ERROR'));
       }
 
       const { walletAddress, initData } = parsed.data;
@@ -60,7 +60,7 @@ export const authController = {
     try {
       const parsed = RefreshTokenSchema.safeParse(req.body);
       if (!parsed.success) {
-        return next(new AppError(400, parsed.error.errors[0].message, 'VALIDATION_ERROR'));
+        return next(new AppError(400, parsed.error?.errors?.[0]?.message ?? 'Validation error', 'VALIDATION_ERROR'));
       }
 
       const result = await AuthService.refresh(parsed.data.refreshToken);

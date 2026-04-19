@@ -13,7 +13,7 @@ export const matchmakingController = {
   async join(req: Request, res: Response, next: NextFunction) {
     try {
       const parsed = JoinSchema.safeParse(req.body);
-      if (!parsed.success) return next(new AppError(400, parsed.error.errors[0].message, 'VALIDATION_ERROR'));
+      if (!parsed.success) return next(new AppError(400, parsed.error?.errors?.[0]?.message ?? 'Validation error', 'VALIDATION_ERROR'));
       await MatchmakingService.joinQueue(req.user!.userId, parsed.data.stake);
       return res.json({ ok: true, message: 'Joined matchmaking queue' });
     } catch (err) { return next(err); }
