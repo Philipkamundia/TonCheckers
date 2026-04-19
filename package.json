@@ -4,6 +4,10 @@
   "version": "1.0.0",
   "description": "Comprehensive automated test suite for TonCheckers",
   "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
