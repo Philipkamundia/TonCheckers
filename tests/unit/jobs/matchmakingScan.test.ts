@@ -1,7 +1,7 @@
 /**
  * tests/unit/jobs/matchmakingScan.test.ts
  *
- * matchmakingScan — runScan, startLobbyCountdown, cancelLobby
+ * matchmakingScan â€” runScan, startLobbyCountdown, cancelLobby
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -91,9 +91,9 @@ describe('startMatchmakingScan', () => {
   });
 });
 
-// --- runScan — fewer than 2 entries ------------------------------------------
+// --- runScan â€” fewer than 2 entries ------------------------------------------
 
-describe('runScan — fewer than 2 entries', () => {
+describe('runScan â€” fewer than 2 entries', () => {
   it('does nothing when queue has 0 entries', async () => {
     mockGetAllEntries.mockResolvedValue([]);
     const io = makeIo();
@@ -113,9 +113,9 @@ describe('runScan — fewer than 2 entries', () => {
   });
 });
 
-// --- runScan — queue timeout (N-07) ------------------------------------------
+// --- runScan â€” queue timeout (N-07) ------------------------------------------
 
-describe('runScan — queue timeout expiry', () => {
+describe('runScan â€” queue timeout expiry', () => {
   it('removes and notifies player who waited > 10 minutes', async () => {
     const oldEntry = { ...P1, joinedAt: Date.now() - 11 * 60 * 1000 };
     mockGetAllEntries.mockResolvedValue([oldEntry, P2]);
@@ -145,9 +145,9 @@ describe('runScan — queue timeout expiry', () => {
   });
 });
 
-// --- runScan — no match found -------------------------------------------------
+// --- runScan â€” no match found -------------------------------------------------
 
-describe('runScan — no match found', () => {
+describe('runScan â€” no match found', () => {
   it('skips when findMatch returns null', async () => {
     mockGetAllEntries.mockResolvedValue([P1, P2]);
     mockFindMatch.mockReturnValue(null);
@@ -161,9 +161,9 @@ describe('runScan — no match found', () => {
   });
 });
 
-// --- runScan — lock acquisition failure --------------------------------------
+// --- runScan â€” lock acquisition failure --------------------------------------
 
-describe('runScan — lock acquisition failure', () => {
+describe('runScan â€” lock acquisition failure', () => {
   it('releases acquired lock when second lock fails', async () => {
     mockGetAllEntries.mockResolvedValue([P1, P2]);
     mockFindMatch.mockReturnValue({ match: P2, resolvedStake: '1.0', stakeMismatch: false });
@@ -192,9 +192,9 @@ describe('runScan — lock acquisition failure', () => {
   });
 });
 
-// --- runScan — stake mismatch -------------------------------------------------
+// --- runScan â€” stake mismatch -------------------------------------------------
 
-describe('runScan — stake mismatch', () => {
+describe('runScan â€” stake mismatch', () => {
   it('unlocks difference for higher-stake seeker', async () => {
     const highSeeker = { ...P1, stake: '5.0' };
     mockGetAllEntries.mockResolvedValue([highSeeker, P2]);
@@ -226,9 +226,9 @@ describe('runScan — stake mismatch', () => {
   });
 });
 
-// --- runScan — game creation failure -----------------------------------------
+// --- runScan â€” game creation failure -----------------------------------------
 
-describe('runScan — game creation failure', () => {
+describe('runScan â€” game creation failure', () => {
   it('unlocks both players and emits mm.error when createGame throws', async () => {
     mockGetAllEntries.mockResolvedValue([P1, P2]);
     mockFindMatch.mockReturnValue({ match: P2, resolvedStake: '1.0', stakeMismatch: false });
@@ -245,9 +245,9 @@ describe('runScan — game creation failure', () => {
   });
 });
 
-// --- runScan — successful match -----------------------------------------------
+// --- runScan â€” successful match -----------------------------------------------
 
-describe('runScan — successful match', () => {
+describe('runScan â€” successful match', () => {
   it('emits mm.found to both players', async () => {
     mockGetAllEntries.mockResolvedValue([P1, P2]);
     mockFindMatch.mockReturnValue({ match: P2, resolvedStake: '1.0', stakeMismatch: false });
@@ -273,9 +273,9 @@ describe('runScan — successful match', () => {
   });
 });
 
-// --- lobby countdown — game starts -------------------------------------------
+// --- lobby countdown â€” game starts -------------------------------------------
 
-describe('lobby countdown — game starts after timeout', () => {
+describe('lobby countdown â€” game starts after timeout', () => {
   it('activates game and emits mm.game_start when countdown expires', async () => {
     mockGetAllEntries.mockResolvedValue([P1, P2]);
     mockFindMatch.mockReturnValue({ match: P2, resolvedStake: '1.0', stakeMismatch: false });
