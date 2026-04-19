@@ -112,6 +112,7 @@ describe('runWithdrawalRecovery', () => {
         ok: true,
         result: [{
           transaction_id: { hash: 'found-hash', lt: '100' },
+          utime: Math.floor(Date.now() / 1000) - 15 * 60,
           out_msgs: [{ destination: 'EQDdest', value: 5_000_000_000 }],
         }],
       }),
@@ -245,6 +246,7 @@ describe('runWithdrawalRecovery', () => {
     // Page 2: match found
     const page2 = [{
       transaction_id: { hash: 'found-on-page2', lt: '1' },
+      utime: Math.floor(Date.now() / 1000) - 15 * 60,
       out_msgs: [{ destination: 'EQDdest', value: 5_000_000_000 }],
     }];
 

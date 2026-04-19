@@ -86,8 +86,12 @@ async function recoverTransaction(tx: {
       return;
     }
 
-    // H-06: Use seqno for precise matching when available; fall back to amount+dest
-    const onChain = await checkOnChain(hotWallet, tx.destination, tx.amount, tx.hot_wallet_seqno ?? undefined);
+    const seqnoFromPending = extractSeqnoFromPendingHash(tx.ton_tx_hash);
+    const onChain = await checkOnChain(hotWallet, tx.destination, tx.amount, {
+      seqno: tx.hot_wallet_seqno ?? seqnoFromPending,
+      withdrawalId: tx.id,
+      updatedAt: tx.updated_at,
+    });
     if (!onChain.queried) {
       logger.warn(`Withdrawal recovery: TON API unavailable for tx=${tx.id}; skipping auto-refund this run`);
       return;
@@ -134,11 +138,35 @@ async function recoverTransaction(tx: {
   }
 }
 
+function extractSeqnoFromPendingHash(hash: string | null): number | undefined {
+  if (!hash?.startsWith('pending:')) return undefined;
+  const parts = hash.split(':');
+  const seqPart = parts.find(p => p.startsWith('seq'));
+  if (!seqPart) return undefined;
+  const n = Number(seqPart.replace('seq', ''));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function extractCommentText(msg: Record<string, unknown>): string {
+  const direct = String(msg.message ?? msg.comment ?? msg.body ?? '').trim();
+  if (direct) return direct;
+  const msgData = msg.msg_data as Record<string, unknown> | undefined;
+  return String(msgData?.text ?? msgData?.comment ?? '').trim();
+}
+
+function extractTxSeqno(item: Record<string, unknown>): number | undefined {
+  const direct = Number(item.seqno ?? item.account_seqno);
+  if (Number.isFinite(direct)) return direct;
+  const desc = item.description as Record<string, unknown> | undefined;
+  const fromDesc = Number(desc?.seqno ?? desc?.account_seqno);
+  return Number.isFinite(fromDesc) ? fromDesc : undefined;
+}
+
 async function checkOnChain(
   hotWallet:   string,
   destination: string,
   amount:      string,
-  seqno?:      number,
+  options: { seqno?: number; withdrawalId: string; updatedAt: Date },
 ): Promise<{ hash: string | null; queried: boolean }> {
   try {
     const network = process.env.TON_NETWORK || 'testnet';
@@ -149,10 +177,13 @@ async function checkOnChain(
 
     const expectedNano = Math.round(parseFloat(amount) * 1e9);
 
-    // Fetch up to 3 pages of 100 txs (300 total) to cover high-volume wallets.
+    // Fetch up to 20 pages of 100 txs (2000 total) to cover high-volume wallets.
     // Stop early if we find a match.
     let lastLt: string | undefined;
-    for (let page = 0; page < 3; page++) {
+    const updatedAtMs = new Date(options.updatedAt).getTime();
+    const timeWindowMs = 2 * 60 * 60 * 1000; // tight fallback: +/- 2h around tx update time
+    const withdrawalRef = `wd:${options.withdrawalId}`;
+    for (let page = 0; page < 20; page++) {
       const ltParam = lastLt ? `&lt=${lastLt}&hash=` : '';
       const url = `${base}/getTransactions?address=${hotWallet}&limit=100${ltParam}${apiKey ? `&api_key=${apiKey}` : ''}`;
       const res  = await fetch(url);
@@ -162,21 +193,33 @@ async function checkOnChain(
       if (!data.ok || !data.result.length) break;
 
       for (const item of data.result) {
-        const txId    = item.transaction_id as Record<string, unknown> | undefined;
-        const txHash  = String(txId?.hash ?? (item as Record<string, unknown>).hash ?? '');
-        const outMsgs = (item.out_msgs as Array<Record<string, unknown>>) ?? [];
+        const txRecord = item as Record<string, unknown>;
+        const txId    = txRecord.transaction_id as Record<string, unknown> | undefined;
+        const txHash  = String(txId?.hash ?? txRecord.hash ?? '');
+        const txSeqno = extractTxSeqno(txRecord);
+        const txTimestamp = Number(txRecord.utime ?? 0) * 1000;
+        const outMsgs = (txRecord.out_msgs as Array<Record<string, unknown>>) ?? [];
 
         for (const msg of outMsgs) {
           const dest  = String(msg.destination || '');
           const value = Number(msg.value || 0);
+          const comment = extractCommentText(msg);
           const amountMatch =
             dest.toLowerCase() === destination.toLowerCase() &&
             Math.abs(value - expectedNano) < 10_000;
 
-          if (seqno !== undefined && amountMatch) {
+          // Best: deterministic withdrawal reference embedded in outbound comment/body.
+          if (comment && comment.includes(withdrawalRef)) {
             return { hash: txHash, queried: true };
           }
-          if (amountMatch) {
+
+          // Next best: seqno + destination + amount.
+          if (options.seqno !== undefined && txSeqno === options.seqno && amountMatch) {
+            return { hash: txHash, queried: true };
+          }
+
+          // Last resort: destination + amount + tight time window.
+          if (amountMatch && txTimestamp > 0 && Math.abs(txTimestamp - updatedAtMs) <= timeWindowMs) {
             return { hash: txHash, queried: true };
           }
         }

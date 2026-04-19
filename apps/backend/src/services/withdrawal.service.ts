@@ -265,6 +265,7 @@ export class WithdrawalService {
     const toAddress  = Address.parse(destination);
     const nanoAmount = toNano(amount);
     const hotAddr    = wallet.address.toString({ bounceable: false });
+    const withdrawalRef = transactionId ? `wd:${transactionId}` : 'wd:unknown';
 
     // Broadcast the transfer
     try {
@@ -272,7 +273,7 @@ export class WithdrawalService {
         seqno,
         secretKey: keyPair.secretKey,
         sendMode:  SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
-        messages:  [internal({ to: toAddress, value: nanoAmount, body: 'CheckTON withdrawal' })],
+        messages:  [internal({ to: toAddress, value: nanoAmount, body: `CheckTON withdrawal ${withdrawalRef}` })],
       });
     } catch (err) {
       const msg = (err as Error).message;
