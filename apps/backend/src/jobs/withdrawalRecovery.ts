@@ -13,9 +13,9 @@
 import pool from '../config/db.js';
 import { logger } from '../utils/logger.js';
 
-const STUCK_THRESHOLD_MINS   = 10;
+const STUCK_THRESHOLD_MINS   = 10 / 60; // 10 seconds
 const PENDING_REFUND_WAIT_MINS = 30; // wait longer before refunding broadcast-but-unconfirmed txs
-const POLL_INTERVAL_MS       = 5 * 60 * 1000;
+const POLL_INTERVAL_MS       = 60 * 1000; // every 60 seconds
 
 export function startWithdrawalRecoveryJob(): ReturnType<typeof setInterval> {
   recoverStuckWithdrawals();
