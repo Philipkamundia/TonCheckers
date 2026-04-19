@@ -185,7 +185,7 @@ async function checkOnChain(
     const withdrawalRef = `wd:${options.withdrawalId}`;
     const encodedHotWallet = encodeURIComponent(hotWallet);
     for (let page = 0; page < 20; page++) {
-      const ltParam = lastLt ? `&lt=${lastLt}&hash=` : '';
+      const ltParam = lastLt ? `&to_lt=${lastLt}` : '';
       const url = `${base}/getTransactions?address=${encodedHotWallet}&limit=100${ltParam}${apiKey ? `&api_key=${apiKey}` : ''}`;
       const res  = await fetch(url);
       if (!res.ok) {
