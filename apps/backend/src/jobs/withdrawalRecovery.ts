@@ -183,11 +183,24 @@ async function checkOnChain(
     const updatedAtMs = new Date(options.updatedAt).getTime();
     const timeWindowMs = 2 * 60 * 60 * 1000; // tight fallback: +/- 2h around tx update time
     const withdrawalRef = `wd:${options.withdrawalId}`;
+    const encodedHotWallet = encodeURIComponent(hotWallet);
     for (let page = 0; page < 20; page++) {
       const ltParam = lastLt ? `&lt=${lastLt}&hash=` : '';
-      const url = `${base}/getTransactions?address=${hotWallet}&limit=100${ltParam}${apiKey ? `&api_key=${apiKey}` : ''}`;
+      const url = `${base}/getTransactions?address=${encodedHotWallet}&limit=100${ltParam}${apiKey ? `&api_key=${apiKey}` : ''}`;
       const res  = await fetch(url);
-      if (!res.ok) return { hash: null, queried: false };
+      if (!res.ok) {
+        let bodySnippet = '';
+        try {
+          bodySnippet = (await res.text()).slice(0, 200);
+        } catch {
+          bodySnippet = '';
+        }
+        logger.warn(
+          `Withdrawal recovery TON API non-OK: status=${res.status} network=${network} page=${page + 1} ` +
+          `wallet=${hotWallet} url=${url.split('&api_key=')[0]} body=${bodySnippet || '<empty>'}`,
+        );
+        return { hash: null, queried: false };
+      }
 
       const data = await res.json() as { ok: boolean; result: Array<Record<string, unknown>> };
       if (!data.ok || !data.result.length) break;
