@@ -15,7 +15,25 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const { Pool } = pg;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+function buildConnectionString(): string | undefined {
+  const raw = process.env.DATABASE_URL;
+  if (!raw) return raw;
+  try {
+    const parsed = new URL(raw);
+    if (process.env.NODE_ENV === 'production') {
+      parsed.searchParams.set('sslmode', 'no-verify');
+    }
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
+const pool = new Pool({
+  connectionString: buildConnectionString(),
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
 
 async function migrate() {
   const client = await pool.connect();
