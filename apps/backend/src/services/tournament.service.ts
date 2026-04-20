@@ -6,6 +6,7 @@
 import pool from '../config/db.js';
 import { BalanceService } from './balance.service.js';
 import { BracketService } from './bracket.service.js';
+import { LeaderboardService } from './leaderboard.service.js';
 import { NotificationService } from './notification.service.js';
 import { GameService } from './game.service.js';
 import { GameTimerService } from './game-timer.service.js';
@@ -21,6 +22,23 @@ const VALID_BRACKET_SIZES = [8, 16, 32, 64];
 type PendingRoundMatch = { gameId: string; matchId: string; player1Id: string; player2Id: string };
 
 export class TournamentService {
+  private static async emitUserSync(io: Server, userId: string): Promise<void> {
+    const { rows: [user] } = await pool.query(
+      `SELECT id, username, elo, wallet_address AS "walletAddress", games_played AS "gamesPlayed",
+              games_won AS "gamesWon", games_lost AS "gamesLost", games_drawn AS "gamesDrawn",
+              total_won::text AS "totalWon"
+       FROM users WHERE id=$1`,
+      [userId],
+    );
+    const { rows: [balance] } = await pool.query(
+      `SELECT available::text AS available, locked::text AS locked,
+              (available + locked)::text AS total
+       FROM balances WHERE user_id=$1`,
+      [userId],
+    );
+    if (user) io.to(`user:${userId}`).emit('user.profile_updated', user);
+    if (balance) io.to(`user:${userId}`).emit('user.balance_updated', balance);
+  }
 
   // ─── Create ───────────────────────────────────────────────────────────────
 
@@ -612,13 +630,38 @@ export class TournamentService {
       client.release();
     }
 
-    // Notify winner
+    // Notify winner directly (rich winner payload)
     await NotificationService.send(winnerId, 'tournament_result', {
       won: true, tournamentName: t.name, payout: winnerPayout,
     });
-    io.to(`user:${winnerId}`).emit('tournament.completed', {
-      tournamentId, winnerId, winnerPayout, creatorPayout, platformFee,
-    });
+
+    // Emit completion to all participants so non-winners can transition out of
+    // post-round waiting UI without requiring a manual refresh.
+    const { rows: participants } = await pool.query<{ userId: string }>(
+      `SELECT user_id AS "userId"
+       FROM tournament_participants
+       WHERE tournament_id=$1`,
+      [tournamentId],
+    );
+    for (const p of participants) {
+      io.to(`user:${p.userId}`).emit('tournament.completed', {
+        tournamentId, winnerId, winnerPayout, creatorPayout, platformFee,
+      });
+    }
+
+    // Push updated profile/balance immediately after final payout credits.
+    await TournamentService.emitUserSync(io, winnerId);
+    if (t.creatorId !== winnerId) {
+      await TournamentService.emitUserSync(io, t.creatorId);
+    }
+
+    // Keep leaderboard fresh right after tournament completion.
+    try {
+      await LeaderboardService.rebuildAll();
+      io.emit('leaderboard.updated', { at: Date.now() });
+    } catch (err) {
+      logger.error(`Leaderboard refresh after tournament finalize failed: ${(err as Error).message}`);
+    }
 
     logger.info(`Tournament complete: ${tournamentId} winner=${winnerId} payout=${winnerPayout}`);
   }

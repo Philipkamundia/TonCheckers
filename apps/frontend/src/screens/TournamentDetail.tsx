@@ -53,6 +53,9 @@ export function TournamentDetail() {
   const [bracketExpiresAt, setBracketExpiresAt] = useState<number | null>(null);
   const [presenceKind, setPresenceKind] = useState<'start_wait' | 'round_preview'>('start_wait');
   const hasActiveStartWindow = presenceKind === 'start_wait' && Boolean(bracketExpiresAt && bracketExpiresAt > Date.now());
+  const isAlreadyParticipant = Boolean(
+    tournament?.participants.some(p => p.userId === user?.id),
+  );
 
   // Pending complete data — held during complete_preview phase
   const pendingCompleteRef = useRef<{
@@ -64,6 +67,9 @@ export function TournamentDetail() {
       const r = await tournamentApi.get(id!);
       const t = r.data.tournament as TournamentData;
       setTournament(t);
+      if (user?.id && t.participants.some(p => p.userId === user.id)) {
+        setJoined(true);
+      }
       return t;
     } catch {
       return null;
@@ -229,9 +235,9 @@ export function TournamentDetail() {
 
   // Join button
   useEffect(() => {
-    if (!tournament || tournament.status !== 'open' || joined) { hideMainButton(); return; }
+    if (!tournament || tournament.status !== 'open' || joined || isAlreadyParticipant) { hideMainButton(); return; }
     return showMainButton(`Join · ${parseFloat(tournament.entryFee).toFixed(2)} TON`, handleJoin, { color: '#2AABEE' });
-  }, [tournament, joined]);
+  }, [tournament, joined, isAlreadyParticipant]);
 
   async function handleJoin() {
     setMainButtonLoading(true);

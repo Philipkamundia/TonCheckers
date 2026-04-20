@@ -299,7 +299,7 @@ export function registerGameHandlers(io: Server, socket: Socket): void {
 
       await GameTimerService.clearTimer(gameId);
       const drawResult = await SettlementService.settleDraw(
-        gameId, game.player1Id, game.player2Id!, game.stake,
+        gameId, game.player1Id, game.player2Id!, game.stake, io,
       );
       io.to(`game:${gameId}`).emit('game.draw', {
         gameId, stake: drawResult.stake, returned: drawResult.stake,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTelegram } from '../hooks/useTelegram';
+import { onGlobal } from '../hooks/useWebSocket';
 import { leaderboardApi } from '../services/api';
 
 interface Entry {
@@ -25,17 +26,43 @@ export function Leaderboard() {
   const [myRanks, setMyRanks] = useState<Record<Sort, { rank: number | null; total: number }> | null>(null);
   const [loading, setLoading] = useState(true);
 
+  async function refreshEntries(currentSort: Sort) {
+    setLoading(true);
+    try {
+      const r = await leaderboardApi.get(currentSort);
+      setEntries(r.data.entries);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function refreshMyRanks() {
+    try {
+      const r = await leaderboardApi.me();
+      setMyRanks(r.data.ranks);
+    } catch {
+      // no-op
+    }
+  }
+
   useEffect(() => { return showBackButton(() => navigate('/')); }, []);
   useEffect(() => { hideMainButton(); }, []);
 
   useEffect(() => {
-    setLoading(true);
-    leaderboardApi.get(sort).then(r => setEntries(r.data.entries)).finally(() => setLoading(false));
+    refreshEntries(sort);
   }, [sort]);
 
   useEffect(() => {
-    leaderboardApi.me().then(r => setMyRanks(r.data.ranks)).catch(() => null);
+    refreshMyRanks();
   }, []);
+
+  useEffect(() => {
+    const off = onGlobal<{ at: number }>('leaderboard.updated', () => {
+      refreshEntries(sort);
+      refreshMyRanks();
+    });
+    return () => off();
+  }, [sort]);
 
   function valueFor(e: Entry): string {
     switch (sort) {

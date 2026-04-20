@@ -17,7 +17,7 @@ interface CompleteState {
 }
 
 export function TournamentComplete() {
-  const { showMainButton, haptic } = useTelegram();
+  const { showMainButton, showBackButton, haptic } = useTelegram();
   const { setBalance } = useStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -34,6 +34,10 @@ export function TournamentComplete() {
 
   useEffect(() => {
     return showMainButton('Back to Home', () => navigate('/', { replace: true }), { color: '#2AABEE' });
+  }, []);
+
+  useEffect(() => {
+    return showBackButton(() => navigate('/', { replace: true }));
   }, []);
 
   if (!state) return null;
@@ -67,6 +71,13 @@ export function TournamentComplete() {
         }}>
           Share Result
         </button>
+
+        <button
+          style={styles.homeBtn}
+          onClick={() => navigate('/', { replace: true })}
+        >
+          Back to Home
+        </button>
       </div>
     </div>
   );
@@ -88,5 +99,6 @@ const styles: Record<string, React.CSSProperties> = {
   title:     { color: 'var(--tg-theme-text-color)', fontSize: 24, fontWeight: 800, margin: '0 0 8px' },
   sub:       { color: 'var(--tg-theme-hint-color)', fontSize: 15, margin: '0 0 20px' },
   breakdown: { borderTop: '1px solid var(--tg-theme-bg-color)', paddingTop: 12, marginBottom: 20 },
-  shareBtn:  { background: 'var(--tg-theme-bg-color)', border: 'none', borderRadius: 12, padding: '12px 28px', color: '#2AABEE', fontSize: 15, fontWeight: 500, cursor: 'pointer' },
+  shareBtn:  { background: 'var(--tg-theme-bg-color)', border: 'none', borderRadius: 12, padding: '12px 28px', color: '#2AABEE', fontSize: 15, fontWeight: 500, cursor: 'pointer', width: '100%', marginBottom: 10 },
+  homeBtn:   { background: '#2AABEE', border: 'none', borderRadius: 12, padding: '12px 28px', color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer', width: '100%' },
 };

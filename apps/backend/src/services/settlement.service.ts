@@ -10,6 +10,7 @@
  */
 import pool from '../config/db.js';
 import { EloService } from './elo.service.js';
+import { LeaderboardService } from './leaderboard.service.js';
 import { NotificationService } from './notification.service.js';
 import { TournamentService } from './tournament.service.js';
 import { logger } from '../utils/logger.js';
@@ -53,6 +54,15 @@ export class SettlementService {
     );
     if (user) io.to(`user:${userId}`).emit('user.profile_updated', user);
     if (balance) io.to(`user:${userId}`).emit('user.balance_updated', balance);
+  }
+
+  private static async refreshLeaderboard(io: Server): Promise<void> {
+    try {
+      await LeaderboardService.rebuildAll();
+      io.emit('leaderboard.updated', { at: Date.now() });
+    } catch (err) {
+      logger.error(`Leaderboard refresh after settlement failed: ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -212,6 +222,7 @@ export class SettlementService {
         SettlementService.emitUserSync(io, winnerId),
         SettlementService.emitUserSync(io, loserId),
       ]);
+      await SettlementService.refreshLeaderboard(io);
     }
 
     // Advance tournament bracket if this game belongs to a tournament match
@@ -283,6 +294,7 @@ export class SettlementService {
         SettlementService.emitUserSync(io, player1Id),
         SettlementService.emitUserSync(io, player2Id),
       ]);
+      await SettlementService.refreshLeaderboard(io);
     }
     return { gameId, player1Id, player2Id, stake: stakeEach };
   }

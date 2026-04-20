@@ -23,7 +23,7 @@ export interface LeaderboardEntry {
 }
 
 const CACHE_KEY_PREFIX = 'leaderboard:';
-const CACHE_TTL_SECS   = 5 * 60;  // 5 minutes
+const CACHE_TTL_SECS   = 60;  // 1 minute
 const PAGE_SIZE        = 50;
 
 export class LeaderboardService {

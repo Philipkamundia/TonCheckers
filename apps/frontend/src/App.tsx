@@ -49,6 +49,12 @@ onGlobal<StartingPayload>('tournament.starting', (data) => {
   _startingHandlers.forEach(h => h(data));
 });
 
+type StartingSoonPayload = { tournamentId: string; name: string; minutesUntil: number };
+let _startingSoonHandlers: Array<(data: StartingSoonPayload) => void> = [];
+onGlobal<StartingSoonPayload>('tournament.starting_soon', (data) => {
+  _startingSoonHandlers.forEach(h => h(data));
+});
+
 function AppRoutes() {
   const { accessToken, user, setUser, setBalance } = useStore();
   const navigate = useNavigate();
@@ -56,6 +62,7 @@ function AppRoutes() {
   const postAuthPath = '/';
 
   const [tournamentPrompts, setTournamentPrompts] = useState<StartingPayload[]>([]);
+  const [startingSoonPrompts, setStartingSoonPrompts] = useState<StartingSoonPayload[]>([]);
   const [nowMs, setNowMs] = useState(Date.now());
 
   // #region agent log
@@ -74,6 +81,18 @@ function AppRoutes() {
     };
     _startingHandlers.push(handler);
     return () => { _startingHandlers = _startingHandlers.filter(h => h !== handler); };
+  }, []);
+
+  // Subscribe this component instance to the global starting_soon events
+  useEffect(() => {
+    const handler = (data: StartingSoonPayload) => {
+      setStartingSoonPrompts(prev => {
+        if (prev.find(p => p.tournamentId === data.tournamentId)) return prev;
+        return [...prev, data];
+      });
+    };
+    _startingSoonHandlers.push(handler);
+    return () => { _startingSoonHandlers = _startingSoonHandlers.filter(h => h !== handler); };
   }, []);
 
   // Global user/tournament realtime sync
@@ -168,6 +187,15 @@ function AppRoutes() {
     setTournamentPrompts(prev => prev.filter(p => p.tournamentId !== tournamentId));
   }
 
+  function openStartingSoonTournament(tournamentId: string) {
+    setStartingSoonPrompts(prev => prev.filter(p => p.tournamentId !== tournamentId));
+    navigate(`/tournaments/${tournamentId}`);
+  }
+
+  function dismissStartingSoon(tournamentId: string) {
+    setStartingSoonPrompts(prev => prev.filter(p => p.tournamentId !== tournamentId));
+  }
+
   return (
     <>
       {/* Tournament starting prompts — stacked, one per tournament */}
@@ -194,6 +222,33 @@ function AppRoutes() {
               flex: 1, background: 'var(--tg-theme-bg-color)', border: 'none', borderRadius: 10,
               padding: '10px', color: 'var(--tg-theme-hint-color)', fontSize: 14, cursor: 'pointer',
             }}>Decline</button>
+          </div>
+        </div>
+      ))}
+      {/* Tournament starting soon prompts (30-minute heads up) */}
+      {startingSoonPrompts.map((p, i) => (
+        <div key={`soon:${p.tournamentId}`} style={{
+          position: 'fixed', bottom: 80 + (tournamentPrompts.length + i) * 130, left: 16, right: 16, zIndex: 1000,
+          background: 'var(--tg-theme-secondary-bg-color)',
+          borderRadius: 16, padding: '14px 16px',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          border: '1px solid rgba(42,171,238,0.6)',
+        }}>
+          <p style={{ color: 'var(--tg-theme-text-color)', fontWeight: 700, fontSize: 15, margin: '0 0 4px' }}>
+            ⏰ Tournament starts soon
+          </p>
+          <p style={{ color: 'var(--tg-theme-hint-color)', fontSize: 13, margin: '0 0 12px' }}>
+            Starts in {p.minutesUntil} minutes.
+          </p>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button onClick={() => openStartingSoonTournament(p.tournamentId)} style={{
+              flex: 1, background: '#2AABEE', border: 'none', borderRadius: 10,
+              padding: '10px', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+            }}>View Tournament</button>
+            <button onClick={() => dismissStartingSoon(p.tournamentId)} style={{
+              flex: 1, background: 'var(--tg-theme-bg-color)', border: 'none', borderRadius: 10,
+              padding: '10px', color: 'var(--tg-theme-hint-color)', fontSize: 14, cursor: 'pointer',
+            }}>Dismiss</button>
           </div>
         </div>
       ))}
