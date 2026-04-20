@@ -36,6 +36,22 @@ export function TournamentPostRound() {
   const [roundPreviewExpiresAt, setRoundPreviewExpiresAt] = useState<number | null>(null);
   const [roundPreviewCountdown, setRoundPreviewCountdown] = useState<number>(0);
 
+  function navigateToComplete(t: TournamentDetail) {
+    const winnerId = t.winnerId ?? '';
+    const winner = t.participants.find(p => p.userId === winnerId);
+    const isWinner = winnerId === user?.id;
+    navigate(`/tournaments/${t.id}/complete`, {
+      replace: true,
+      state: {
+        tournamentName: t.name,
+        isWinner,
+        winnerUsername: winner?.username ?? '?',
+        winnerPayout: t.winnerPayout ?? '0',
+        prizePool: t.prizePool ?? '0',
+      },
+    });
+  }
+
   // #region agent log
   useEffect(() => {
     debugIngest({ location: 'TournamentPostRound.tsx:mount', message: 'post_round_mounted', data: { tournamentId: tournamentId ?? null }, hypothesisId: 'H3', runId: 'post-fix' });
@@ -48,8 +64,14 @@ export function TournamentPostRound() {
 
   useEffect(() => {
     if (!tournamentId) return;
-    tournamentApi.get(tournamentId).then(r => setTournament(r.data.tournament)).catch(() => null);
-  }, [tournamentId]);
+    tournamentApi.get(tournamentId).then(r => {
+      const t = r.data.tournament as TournamentDetail;
+      setTournament(t);
+      if (t.status === 'completed') {
+        navigateToComplete(t);
+      }
+    }).catch(() => null);
+  }, [tournamentId, user?.id]);
 
   useEffect(() => {
     const unsubs = [
@@ -68,7 +90,11 @@ export function TournamentPostRound() {
 
       on<{ tournamentId: string; winnerId: string; winnerPayout: string }>('tournament.completed', (data) => {
         if (data.tournamentId !== tournamentId) return;
-        tournamentApi.get(tournamentId!).then(r => setTournament(r.data.tournament)).catch(() => null);
+        tournamentApi.get(tournamentId!).then(r => {
+          const t = r.data.tournament as TournamentDetail;
+          setTournament(t);
+          navigateToComplete(t);
+        }).catch(() => null);
         setNextMatchMsg('');
       }),
 
@@ -78,7 +104,7 @@ export function TournamentPostRound() {
       }),
     ];
     return () => unsubs.forEach(u => u());
-  }, [on, tournamentId]);
+  }, [on, tournamentId, user?.id]);
 
   useEffect(() => {
     if (!roundPreviewExpiresAt) return;

@@ -10,9 +10,12 @@
  */
 import pool from '../config/db.js';
 import { EloService } from './elo.service.js';
+import { GameService } from './game.service.js';
 import { LeaderboardService } from './leaderboard.service.js';
 import { NotificationService } from './notification.service.js';
 import { TournamentService } from './tournament.service.js';
+import { TournamentRoundPreviewService } from './tournament-round-preview.service.js';
+import { initialGameState } from '../engine/board.js';
 import { logger } from '../utils/logger.js';
 import type { Server } from 'socket.io';
 
@@ -63,6 +66,95 @@ export class SettlementService {
     } catch (err) {
       logger.error(`Leaderboard refresh after settlement failed: ${(err as Error).message}`);
     }
+  }
+
+  private static async handleTournamentDrawReplay(gameId: string, io: Server): Promise<void> {
+    const { rows: [match] } = await pool.query<{
+      id: string;
+      tournamentId: string;
+      round: number;
+      player1Id: string;
+      player2Id: string;
+      replayCount: number;
+    }>(
+      `SELECT
+         tm.id,
+         tm.tournament_id AS "tournamentId",
+         tm.round,
+         tm.player1_id AS "player1Id",
+         tm.player2_id AS "player2Id",
+         COALESCE(tm.replay_count, 0) AS "replayCount"
+       FROM tournament_matches tm
+       WHERE tm.game_id=$1`,
+      [gameId],
+    );
+
+    if (!match || !match.player1Id || !match.player2Id) return;
+
+    // First draw: schedule one replay with the same lobby+timer mechanics.
+    if (match.replayCount < 1) {
+      const { rows: [p1] } = await pool.query<{ elo: number }>('SELECT elo FROM users WHERE id=$1', [match.player1Id]);
+      const { rows: [p2] } = await pool.query<{ elo: number }>('SELECT elo FROM users WHERE id=$1', [match.player2Id]);
+      const replayGame = await GameService.createGame(
+        match.player1Id,
+        match.player2Id,
+        '0',
+        p1?.elo ?? 1200,
+        p2?.elo ?? 1200,
+        initialGameState(),
+        undefined,
+        'waiting',
+      );
+
+      await pool.query(
+        `UPDATE tournament_matches
+         SET game_id=$1, replay_count=COALESCE(replay_count, 0)+1
+         WHERE id=$2`,
+        [replayGame.id, match.id],
+      );
+
+      const preview = await TournamentRoundPreviewService.openWindow(
+        match.tournamentId,
+        match.round,
+        [{
+          gameId: replayGame.id,
+          matchId: match.id,
+          player1Id: match.player1Id,
+          player2Id: match.player2Id,
+        }],
+      );
+
+      io.to(`user:${match.player1Id}`).emit('tournament.round_preview', {
+        tournamentId: match.tournamentId,
+        round: match.round,
+        expiresAt: preview.expiresAt,
+      });
+      io.to(`user:${match.player2Id}`).emit('tournament.round_preview', {
+        tournamentId: match.tournamentId,
+        round: match.round,
+        expiresAt: preview.expiresAt,
+      });
+      return;
+    }
+
+    // Second draw: force a deterministic winner by higher seed ELO.
+    const { rows: seeds } = await pool.query<{ userId: string; seedElo: number }>(
+      `SELECT user_id AS "userId", seed_elo AS "seedElo"
+       FROM tournament_participants
+       WHERE tournament_id=$1
+         AND user_id = ANY($2::uuid[])`,
+      [match.tournamentId, [match.player1Id, match.player2Id]],
+    );
+
+    const p1Seed = seeds.find(s => s.userId === match.player1Id)?.seedElo ?? 0;
+    const p2Seed = seeds.find(s => s.userId === match.player2Id)?.seedElo ?? 0;
+    const winnerId = p1Seed >= p2Seed ? match.player1Id : match.player2Id;
+
+    logger.warn(
+      `Tournament draw tiebreak: tournament=${match.tournamentId} match=${match.id} ` +
+      `forcedWinner=${winnerId} seeds(${match.player1Id}=${p1Seed}, ${match.player2Id}=${p2Seed})`,
+    );
+    await TournamentService.recordMatchResult(match.tournamentId, match.id, winnerId, io);
   }
 
   /**
@@ -295,6 +387,7 @@ export class SettlementService {
         SettlementService.emitUserSync(io, player2Id),
       ]);
       await SettlementService.refreshLeaderboard(io);
+      await SettlementService.handleTournamentDrawReplay(gameId, io);
     }
     return { gameId, player1Id, player2Id, stake: stakeEach };
   }
