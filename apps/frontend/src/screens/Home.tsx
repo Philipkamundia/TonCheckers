@@ -44,8 +44,8 @@ export function Home() {
 
       {/* Mode Grid */}
       <div style={styles.grid}>
-        <ModeCard emoji="⚔️" title="PvP"          subtitle="Ranked wagering"       onClick={() => navigate('/pvp')}         primary />
-        <ModeCard emoji="🤖" title="Practice"     subtitle="AI opponent"           onClick={() => navigate('/ai')} />
+        <ModeCard emoji="⚔️" title="Online Match (PVP)"          subtitle="play and Earn Ton"       onClick={() => navigate('/pvp')}         primary />
+        <ModeCard emoji="🤖" title="Play Vs AI"     subtitle="AI opponent"           onClick={() => navigate('/ai')} />
         <ModeCard emoji="🏆" title="Tournaments"  subtitle="Compete for prize pool" onClick={() => navigate('/tournaments')} />
         <ModeCard emoji="📊" title="Leaderboard"  subtitle="Global rankings"       onClick={() => navigate('/leaderboard')} />
         <ModeCard emoji="👤" title="Profile"      subtitle="Stats & settings"      onClick={() => navigate('/profile')} />
@@ -64,7 +64,7 @@ export function Home() {
         onClick={() => window.open('https://t.me/toncheckersApp', '_blank', 'noopener,noreferrer')}
       >
         <span style={styles.tgIcon}>✈️</span>
-        <span>Join TonCheckers Community</span>
+        <span>Join TonCheckers Channel</span>
       </button>
     </div>
   );
@@ -96,7 +96,7 @@ const styles: Record<string, React.CSSProperties> = {
   eloLabel:     { color:'var(--tg-theme-hint-color)', fontSize:13 },
   eloValue:     { color:'#2AABEE', fontSize:16, fontWeight:600 },
   grid:         { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 },
-  modeCard:     { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:16, padding:'20px 12px', display:'flex', flexDirection:'column', alignItems:'center', gap:4, cursor:'pointer', textAlign:'center' },
+  modeCard:     { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:16, padding:'15px 10px', display:'flex', flexDirection:'column', alignItems:'center', gap:4, cursor:'pointer', textAlign:'center' },
   primaryCard:  { background:'#2AABEE', gridColumn:'1 / -1' },
   modeEmoji:    { fontSize:28 },
   modeTitle:    { color:'var(--tg-theme-text-color)', fontWeight:600, fontSize:15 },

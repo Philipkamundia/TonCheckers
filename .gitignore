@@ -44,3 +44,5 @@ pnpm-lock.yaml
 # ─── Compiled JS in frontend src (keep only .ts/.tsx source files) ────────────
 apps/frontend/src/**/*.js
 !apps/frontend/src/index.css
+*.zip
+toncheckers.zip

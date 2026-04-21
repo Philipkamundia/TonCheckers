@@ -481,7 +481,7 @@ describe('game.accept_draw', () => {
     const io = makeIo();
     registerGameHandlers(io, socket);
     await getHandler(socket, 'game.accept_draw')({ gameId: 'game-1' });
-    expect(mockSettleDraw).toHaveBeenCalledWith('game-1', 'player-1', 'player-2', '1.0');
+    expect(mockSettleDraw).toHaveBeenCalledWith('game-1', 'player-1', 'player-2', '1.0', io);
     expect(io._toEmit).toHaveBeenCalledWith('game.draw', expect.objectContaining({
       gameId: 'game-1', message: 'Draw agreed — stakes returned in full',
     }));

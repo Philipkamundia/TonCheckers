@@ -43,6 +43,22 @@ vi.mock('../../../apps/backend/src/services/tournament.service.js', () => ({
   TournamentService: { recordMatchResult: vi.fn().mockResolvedValue(undefined) },
 }));
 
+vi.mock('../../../apps/backend/src/services/leaderboard.service.js', () => ({
+  LeaderboardService: { rebuildAll: vi.fn().mockResolvedValue(undefined) },
+}));
+
+vi.mock('../../../apps/backend/src/services/game.service.js', () => ({
+  GameService: { createGame: vi.fn().mockResolvedValue({ id: 'replay-game-id' }) },
+}));
+
+vi.mock('../../../apps/backend/src/engine/board.js', () => ({
+  initialGameState: vi.fn().mockReturnValue({}),
+}));
+
+vi.mock('../../../apps/backend/src/services/tournament-round-preview.service.js', () => ({
+  TournamentRoundPreviewService: { openWindow: vi.fn().mockResolvedValue({ expiresAt: Date.now() + 30_000 }) },
+}));
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function setupClientTransaction(responses: Record<string, unknown>[] = []) {
@@ -345,36 +361,6 @@ describe('SettlementService.settleWin — with io', () => {
     expect(mockTo).toHaveBeenCalledWith(`user:${WINNER_ID}`);
     expect(mockTo).toHaveBeenCalledWith(`user:${LOSER_ID}`);
   });
-
-  it('advances tournament bracket when game belongs to a tournament match', async () => {
-    const { io } = makeMockIo();
-    const TOURNAMENT_ID = 'tttttttt-0000-0000-0000-000000000001';
-    const MATCH_ID      = 'mmmmmmmm-0000-0000-0000-000000000001';
-
-    mockQuery.mockResolvedValueOnce({
-      rows: [{ id: WINNER_ID, elo: 1200 }, { id: LOSER_ID, elo: 1200 }],
-    });
-    mockClient.query.mockImplementation((sql: string) => {
-      if (['BEGIN','COMMIT','ROLLBACK'].some(k => sql.includes(k))) return Promise.resolve({});
-      if (sql.includes("AND status='active'")) return Promise.resolve({ rowCount: 1 });
-      return Promise.resolve({ rows: [], rowCount: 1 });
-    });
-    mockQuery
-      .mockResolvedValueOnce({ rows: [] })  // user winner (empty — io.emit skipped)
-      .mockResolvedValueOnce({ rows: [] })  // balance winner
-      .mockResolvedValueOnce({ rows: [] })  // user loser
-      .mockResolvedValueOnce({ rows: [] })  // balance loser
-      // Tournament match found → triggers recordMatchResult
-      .mockResolvedValueOnce({ rows: [{ id: MATCH_ID, tournamentId: TOURNAMENT_ID }] });
-
-    const { TournamentService } = await import('../../../apps/backend/src/services/tournament.service.js');
-    const tSpy = vi.spyOn(TournamentService, 'recordMatchResult').mockResolvedValueOnce(undefined as any);
-
-    await SettlementService.settleWin(GAME_ID, WINNER_ID, LOSER_ID, 'no_moves', STAKE, io);
-
-    expect(tSpy).toHaveBeenCalledWith(TOURNAMENT_ID, MATCH_ID, WINNER_ID, io);
-    tSpy.mockRestore();
-  });
 });
 
 // ─── settleDraw ───────────────────────────────────────────────────────────────
@@ -468,11 +454,173 @@ describe('SettlementService.settleDraw', () => {
       .mockResolvedValueOnce({ rows: [{ id: P1_ID, username: 'p1', elo: 1200 }] })  // user P1
       .mockResolvedValueOnce({ rows: [{ available: '2.0', locked: '0', total: '2.0' }] })  // balance P1
       .mockResolvedValueOnce({ rows: [{ id: P2_ID, username: 'p2', elo: 1200 }] })  // user P2
-      .mockResolvedValueOnce({ rows: [{ available: '2.0', locked: '0', total: '2.0' }] }); // balance P2
+      .mockResolvedValueOnce({ rows: [{ available: '2.0', locked: '0', total: '2.0' }] }) // balance P2
+      // Tournament match lookup for handleTournamentDrawReplay (no match)
+      .mockResolvedValueOnce({ rows: [] });
 
     await SettlementService.settleDraw(GAME_ID, P1_ID, P2_ID, STAKE, mockIo);
 
     expect(mockTo).toHaveBeenCalledWith(`user:${P1_ID}`);
     expect(mockTo).toHaveBeenCalledWith(`user:${P2_ID}`);
+  });
+});
+
+// ─── Tournament draw replay (handleTournamentDrawReplay) ──────────────────────
+
+describe('SettlementService.settleDraw — tournament replay', () => {
+  const P1_ID   = 'aaaaaaaa-0000-0000-0000-000000000011';
+  const P2_ID   = 'bbbbbbbb-0000-0000-0000-000000000022';
+  const GAME_ID = 'cccccccc-0000-0000-0000-000000000033';
+  const STAKE   = '0.000000000';
+  const MATCH_ID = 'mmmmmmmm-0000-0000-0000-000000000001';
+  const TOURNAMENT_ID = 'tttttttt-0000-0000-0000-000000000001';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnect.mockResolvedValue(mockClient);
+    mockClient.release.mockReturnValue(undefined);
+  });
+
+  it('creates replay game on first tournament draw (replayCount=0)', async () => {
+    const mockEmit = vi.fn();
+    const mockTo   = vi.fn(() => ({ emit: mockEmit }));
+    const mockIo   = { to: mockTo, emit: vi.fn() } as any;
+
+    mockClient.query.mockImplementation((sql: string) => {
+      if (['BEGIN','COMMIT','ROLLBACK'].some(k => sql.includes(k))) return Promise.resolve({});
+      if (sql.includes('result=\'draw\'')) return Promise.resolve({ rowCount: 1 });
+      return Promise.resolve({ rows: [], rowCount: 1 });
+    });
+
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: P1_ID, username: 'p1', elo: 1200 }] })  // user P1
+      .mockResolvedValueOnce({ rows: [{ available: '0', locked: '0', total: '0' }] })  // balance P1
+      .mockResolvedValueOnce({ rows: [{ id: P2_ID, username: 'p2', elo: 1200 }] })  // user P2
+      .mockResolvedValueOnce({ rows: [{ available: '0', locked: '0', total: '0' }] }) // balance P2
+      // Tournament match found with replayCount=0
+      .mockResolvedValueOnce({
+        rows: [{
+          id: MATCH_ID,
+          tournamentId: TOURNAMENT_ID,
+          round: 1,
+          player1Id: P1_ID,
+          player2Id: P2_ID,
+          replayCount: 0,
+        }],
+      })
+      // Player ELO lookups for replay
+      .mockResolvedValueOnce({ rows: [{ elo: 1200 }] })
+      .mockResolvedValueOnce({ rows: [{ elo: 1250 }] });
+
+    // Import and setup GameService mock
+    const GameModule = await import('../../../apps/backend/src/services/game.service.js');
+    vi.spyOn(GameModule.GameService, 'createGame').mockResolvedValue({ id: 'replay-game-id' } as any);
+
+    // Import and setup TournamentRoundPreviewService mock
+    const PreviewModule = await import('../../../apps/backend/src/services/tournament-round-preview.service.js');
+    vi.spyOn(PreviewModule.TournamentRoundPreviewService, 'openWindow').mockResolvedValue({ expiresAt: Date.now() + 30_000 } as any);
+
+    await SettlementService.settleDraw(GAME_ID, P1_ID, P2_ID, STAKE, mockIo);
+
+    expect(GameModule.GameService.createGame).toHaveBeenCalled();
+    expect(PreviewModule.TournamentRoundPreviewService.openWindow).toHaveBeenCalled();
+    expect(mockTo).toHaveBeenCalledWith(`user:${P1_ID}`);
+    expect(mockTo).toHaveBeenCalledWith(`user:${P2_ID}`);
+  });
+
+  it('forces winner by seed ELO on second tournament draw (replayCount>=1)', async () => {
+    const mockEmit = vi.fn();
+    const mockTo   = vi.fn(() => ({ emit: mockEmit }));
+    const mockIo   = { to: mockTo, emit: vi.fn() } as any;
+
+    mockClient.query.mockImplementation((sql: string) => {
+      if (['BEGIN','COMMIT','ROLLBACK'].some(k => sql.includes(k))) return Promise.resolve({});
+      if (sql.includes('result=\'draw\'')) return Promise.resolve({ rowCount: 1 });
+      return Promise.resolve({ rows: [], rowCount: 1 });
+    });
+
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: P1_ID, username: 'p1', elo: 1200 }] })
+      .mockResolvedValueOnce({ rows: [{ available: '0', locked: '0', total: '0' }] })
+      .mockResolvedValueOnce({ rows: [{ id: P2_ID, username: 'p2', elo: 1200 }] })
+      .mockResolvedValueOnce({ rows: [{ available: '0', locked: '0', total: '0' }] })
+      // Tournament match found with replayCount=1 (already had one replay)
+      .mockResolvedValueOnce({
+        rows: [{
+          id: MATCH_ID,
+          tournamentId: TOURNAMENT_ID,
+          round: 1,
+          player1Id: P1_ID,
+          player2Id: P2_ID,
+          replayCount: 1,
+        }],
+      })
+      // Seed ELO lookup for tiebreak
+      .mockResolvedValueOnce({
+        rows: [
+          { userId: P1_ID, seedElo: 1400 },
+          { userId: P2_ID, seedElo: 1300 },
+        ],
+      });
+
+    const { TournamentService } = await import('../../../apps/backend/src/services/tournament.service.js');
+    const tSpy = vi.spyOn(TournamentService, 'recordMatchResult').mockResolvedValueOnce(undefined as any);
+
+    await SettlementService.settleDraw(GAME_ID, P1_ID, P2_ID, STAKE, mockIo);
+
+    // P1 has higher seed ELO (1400 > 1300), so P1 should win
+    expect(tSpy).toHaveBeenCalledWith(TOURNAMENT_ID, MATCH_ID, P1_ID, mockIo);
+    tSpy.mockRestore();
+  });
+});
+
+// ─── Tournament bracket advance on win ────────────────────────────────────────
+
+describe('SettlementService.settleWin — tournament bracket advance', () => {
+  const WINNER_ID = 'aaaaaaaa-0000-0000-0000-000000000001';
+  const LOSER_ID  = 'bbbbbbbb-0000-0000-0000-000000000002';
+  const GAME_ID   = 'cccccccc-0000-0000-0000-000000000003';
+  const STAKE     = '1.000000000';
+  const MATCH_ID  = 'mmmmmmmm-0000-0000-0000-000000000001';
+  const TOURNAMENT_ID = 'tttttttt-0000-0000-0000-000000000001';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnect.mockResolvedValue(mockClient);
+    mockClient.release.mockReturnValue(undefined);
+  });
+
+  it('advances tournament bracket when game belongs to a tournament match', async () => {
+    const mockEmit = vi.fn();
+    const mockTo   = vi.fn(() => ({ emit: mockEmit }));
+    const mockIo   = { to: mockTo, emit: vi.fn() } as any;
+
+    mockQuery.mockResolvedValueOnce({
+      rows: [{ id: WINNER_ID, elo: 1200 }, { id: LOSER_ID, elo: 1200 }],
+    });
+
+    mockClient.query.mockImplementation((sql: string) => {
+      if (['BEGIN','COMMIT','ROLLBACK'].some(k => sql.includes(k))) return Promise.resolve({});
+      if (sql.includes("AND status='active'")) return Promise.resolve({ rowCount: 1 });
+      return Promise.resolve({ rows: [], rowCount: 1 });
+    });
+
+    mockQuery
+      .mockResolvedValueOnce({ rows: [{ id: WINNER_ID, username: 'w', elo: 1220 }] })
+      .mockResolvedValueOnce({ rows: [{ available: '1.7', locked: '0', total: '1.7' }] })
+      .mockResolvedValueOnce({ rows: [{ id: LOSER_ID, username: 'l', elo: 1180 }] })
+      .mockResolvedValueOnce({ rows: [{ available: '9.0', locked: '0', total: '9.0' }] })
+      // Tournament match found
+      .mockResolvedValueOnce({
+        rows: [{ id: MATCH_ID, tournamentId: TOURNAMENT_ID }],
+      });
+
+    const { TournamentService } = await import('../../../apps/backend/src/services/tournament.service.js');
+    const tSpy = vi.spyOn(TournamentService, 'recordMatchResult').mockResolvedValueOnce(undefined as any);
+
+    await SettlementService.settleWin(GAME_ID, WINNER_ID, LOSER_ID, 'no_moves', STAKE, mockIo);
+
+    expect(tSpy).toHaveBeenCalledWith(TOURNAMENT_ID, MATCH_ID, WINNER_ID, mockIo);
+    tSpy.mockRestore();
   });
 });

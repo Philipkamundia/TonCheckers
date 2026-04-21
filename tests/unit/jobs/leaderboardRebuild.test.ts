@@ -50,14 +50,14 @@ describe('startLeaderboardRebuild', () => {
     expect(typeof handle).not.toBe('undefined');
   });
 
-  it('calls rebuildAll again after 5 minutes', async () => {
+  it('calls rebuildAll again after 1 minute', async () => {
     mockLeaderboardService.rebuildAll.mockResolvedValue(undefined);
     handle = startLeaderboardRebuild();
     await vi.advanceTimersByTimeAsync(0);
     expect(mockLeaderboardService.rebuildAll).toHaveBeenCalledTimes(1);
 
-    // Advance 5 minutes
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    // Advance 1 minute
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(mockLeaderboardService.rebuildAll).toHaveBeenCalledTimes(2);
   });
 
@@ -66,8 +66,8 @@ describe('startLeaderboardRebuild', () => {
     handle = startLeaderboardRebuild();
     await vi.advanceTimersByTimeAsync(0);
 
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(mockLeaderboardService.rebuildAll).toHaveBeenCalledTimes(3);
   });
 
@@ -89,7 +89,7 @@ describe('startLeaderboardRebuild', () => {
     handle = startLeaderboardRebuild();
     await vi.advanceTimersByTimeAsync(0);
 
-    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(mockLogger.error).toHaveBeenCalledWith(
       'Leaderboard rebuild error: Timeout',
     );
@@ -105,6 +105,6 @@ describe('startLeaderboardRebuild', () => {
   it('logs info message on start', () => {
     mockLeaderboardService.rebuildAll.mockResolvedValue(undefined);
     handle = startLeaderboardRebuild();
-    expect(mockLogger.info).toHaveBeenCalledWith('Leaderboard rebuild job: every 5 minutes');
+    expect(mockLogger.info).toHaveBeenCalledWith('Leaderboard rebuild job: every 1 minute');
   });
 });

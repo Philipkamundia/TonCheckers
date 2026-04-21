@@ -6,13 +6,44 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Hoisted mocks (must be before vi.mock calls) ─────────────────────────────
 
-const { mockQuery, mockClient } = vi.hoisted(() => {
+const {
+  mockQuery,
+  mockClient,
+  mockTournamentService,
+  mockLeaderboardService,
+  mockGameService,
+  mockTournamentRoundPreviewService,
+} = vi.hoisted(() => {
   const mockClient = {
     query:   vi.fn(),
     release: vi.fn(),
   };
   const mockQuery = vi.fn();
-  return { mockQuery, mockClient };
+  const mockTournamentService = {
+    recordMatchResult: vi.fn().mockResolvedValue(undefined),
+  };
+  const mockLeaderboardService = {
+    rebuildAll: vi.fn().mockResolvedValue(undefined),
+  };
+  const mockGameService = {
+    createGame: vi.fn().mockResolvedValue({ id: 'replay-game-001' }),
+  };
+  const mockTournamentRoundPreviewService = {
+    openWindow: vi.fn().mockResolvedValue({
+      tournamentId: 't-1',
+      round: 1,
+      expiresAt: Date.now() + 30_000,
+      matches: [],
+    }),
+  };
+  return {
+    mockQuery,
+    mockClient,
+    mockTournamentService,
+    mockLeaderboardService,
+    mockGameService,
+    mockTournamentRoundPreviewService,
+  };
 });
 
 vi.mock('../config/db.js', () => ({
@@ -27,7 +58,19 @@ vi.mock('../services/notification.service.js', () => ({
 }));
 
 vi.mock('../services/tournament.service.js', () => ({
-  TournamentService: { recordMatchResult: vi.fn().mockResolvedValue(undefined) },
+  TournamentService: mockTournamentService,
+}));
+
+vi.mock('../services/leaderboard.service.js', () => ({
+  LeaderboardService: mockLeaderboardService,
+}));
+
+vi.mock('../services/game.service.js', () => ({
+  GameService: mockGameService,
+}));
+
+vi.mock('../services/tournament-round-preview.service.js', () => ({
+  TournamentRoundPreviewService: mockTournamentRoundPreviewService,
 }));
 
 import { SettlementService } from '../services/settlement.service.js';
@@ -50,6 +93,19 @@ beforeEach(() => {
   mockQuery.mockReset();
   mockClient.query.mockReset();
   mockClient.release.mockReset();
+  mockTournamentService.recordMatchResult.mockReset();
+  mockLeaderboardService.rebuildAll.mockReset();
+  mockGameService.createGame.mockReset();
+  mockTournamentRoundPreviewService.openWindow.mockReset();
+  mockTournamentService.recordMatchResult.mockResolvedValue(undefined);
+  mockLeaderboardService.rebuildAll.mockResolvedValue(undefined);
+  mockGameService.createGame.mockResolvedValue({ id: 'replay-game-001' });
+  mockTournamentRoundPreviewService.openWindow.mockResolvedValue({
+    tournamentId: 't-1',
+    round: 1,
+    expiresAt: Date.now() + 30_000,
+    matches: [],
+  });
   // Default fallback for any unexpected pool.query calls (e.g. tournament_matches lookup)
   mockQuery.mockResolvedValue({ rows: [], rowCount: 0 });
 });
@@ -206,5 +262,87 @@ describe('settleDraw', () => {
     ).rejects.toThrow('DB error');
 
     expect(mockClient.release).toHaveBeenCalledOnce();
+  });
+
+  it('tournament draw #1 creates replay and emits round preview', async () => {
+    setupSuccessfulTransaction(1);
+    const ioEmit = vi.fn();
+    const roomEmit = vi.fn();
+    const io = {
+      emit: ioEmit,
+      to: vi.fn(() => ({ emit: roomEmit })),
+    } as any;
+
+    mockQuery
+      // user sync player1
+      .mockResolvedValueOnce({ rows: [{ id: P1, username: 'p1', elo: 1200, walletAddress: 'w1', gamesPlayed: 1, gamesWon: 1, gamesLost: 0, gamesDrawn: 0, totalWon: '1' }] })
+      .mockResolvedValueOnce({ rows: [{ available: '1', locked: '0', total: '1' }] })
+      // user sync player2
+      .mockResolvedValueOnce({ rows: [{ id: P2, username: 'p2', elo: 1200, walletAddress: 'w2', gamesPlayed: 1, gamesWon: 0, gamesLost: 1, gamesDrawn: 0, totalWon: '0' }] })
+      .mockResolvedValueOnce({ rows: [{ available: '1', locked: '0', total: '1' }] })
+      // tournament match lookup
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'match-1',
+          tournamentId: 't-1',
+          round: 2,
+          player1Id: P1,
+          player2Id: P2,
+          replayCount: 0,
+        }],
+      })
+      // users elo for replay game creation
+      .mockResolvedValueOnce({ rows: [{ elo: 1210 }] })
+      .mockResolvedValueOnce({ rows: [{ elo: 1190 }] })
+      // update tournament_matches with replay game
+      .mockResolvedValueOnce({ rowCount: 1, rows: [] });
+
+    await SettlementService.settleDraw(GAME_ID, P1, P2, '0', io);
+
+    expect(mockGameService.createGame).toHaveBeenCalledOnce();
+    expect(mockTournamentRoundPreviewService.openWindow).toHaveBeenCalledOnce();
+    expect(mockTournamentService.recordMatchResult).not.toHaveBeenCalled();
+    expect(ioEmit).toHaveBeenCalledWith('leaderboard.updated', expect.any(Object));
+    expect(roomEmit).toHaveBeenCalledWith('tournament.round_preview', expect.objectContaining({ tournamentId: 't-1', round: 2 }));
+  });
+
+  it('tournament draw #2 forces winner by higher seed elo', async () => {
+    setupSuccessfulTransaction(1);
+    const io = {
+      emit: vi.fn(),
+      to: vi.fn(() => ({ emit: vi.fn() })),
+    } as any;
+
+    mockQuery
+      // user sync player1
+      .mockResolvedValueOnce({ rows: [{ id: P1, username: 'p1', elo: 1200, walletAddress: 'w1', gamesPlayed: 1, gamesWon: 1, gamesLost: 0, gamesDrawn: 0, totalWon: '1' }] })
+      .mockResolvedValueOnce({ rows: [{ available: '1', locked: '0', total: '1' }] })
+      // user sync player2
+      .mockResolvedValueOnce({ rows: [{ id: P2, username: 'p2', elo: 1200, walletAddress: 'w2', gamesPlayed: 1, gamesWon: 0, gamesLost: 1, gamesDrawn: 0, totalWon: '0' }] })
+      .mockResolvedValueOnce({ rows: [{ available: '1', locked: '0', total: '1' }] })
+      // tournament match lookup
+      .mockResolvedValueOnce({
+        rows: [{
+          id: 'match-2',
+          tournamentId: 't-2',
+          round: 3,
+          player1Id: P1,
+          player2Id: P2,
+          replayCount: 1,
+        }],
+      })
+      // seeds lookup
+      .mockResolvedValueOnce({
+        rows: [
+          { userId: P1, seedElo: 1400 },
+          { userId: P2, seedElo: 1300 },
+        ],
+      });
+
+    await SettlementService.settleDraw(GAME_ID, P1, P2, '0', io);
+
+    expect(mockGameService.createGame).not.toHaveBeenCalled();
+    expect(mockTournamentRoundPreviewService.openWindow).not.toHaveBeenCalled();
+    expect(mockTournamentService.recordMatchResult).toHaveBeenCalledWith('t-2', 'match-2', P1, io);
   });
 });

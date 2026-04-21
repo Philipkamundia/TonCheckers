@@ -35,7 +35,7 @@ describe('LeaderboardService.rebuild', () => {
       'leaderboard:elo',
       expect.any(String),
       'EX',
-      300,
+      60,
     );
   });
 
@@ -51,7 +51,7 @@ describe('LeaderboardService.rebuild', () => {
     mockRedis.set.mockResolvedValue('OK');
     for (const sort of ['elo', 'ton_won', 'win_rate', 'games_played'] as const) {
       await LeaderboardService.rebuild(sort);
-      expect(mockRedis.set).toHaveBeenCalledWith(`leaderboard:${sort}`, expect.any(String), 'EX', 300);
+      expect(mockRedis.set).toHaveBeenCalledWith(`leaderboard:${sort}`, expect.any(String), 'EX', 60);
     }
   });
 });

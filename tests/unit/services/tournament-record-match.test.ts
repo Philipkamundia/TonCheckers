@@ -146,7 +146,17 @@ describe('TournamentService — round completion', () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [{ count: 0 }] })
       .mockResolvedValueOnce({ rows: [{ winnerId: WINNER }] })
-      .mockResolvedValueOnce({ rows: [{ name: 'Test', prizePool: '100', creatorId: 'creator-1' }] });
+      .mockResolvedValueOnce({ rows: [{ name: 'Test', prizePool: '100', creatorId: 'creator-1' }] })
+      // finalizeTournament: participants query
+      .mockResolvedValueOnce({ rows: [{ userId: WINNER }] })
+      // emitUserSync for winner
+      .mockResolvedValueOnce({ rows: [{ id: WINNER, username: 'Winner', elo: 1200, walletAddress: null, gamesPlayed: 10, gamesWon: 5, totalWon: '50' }] })
+      .mockResolvedValueOnce({ rows: [{ available: '100', locked: '0' }] })
+      // LeaderboardService.rebuildAll (4 sort modes)
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] });
 
     await TournamentService.recordMatchResult(T_ID, M_ID, WINNER, mockIo);
     // finalizeTournament runs inside a client transaction

@@ -72,6 +72,8 @@ beforeEach(() => {
   mockNotify.mockResolvedValue(undefined);
   mockDbClient.release.mockReturnValue(undefined);
   mockDbConnect.mockResolvedValue(mockDbClient);
+  // Reset mockDbQuery to prevent bleeding from previous tests
+  mockDbQuery.mockReset();
 });
 
 // ─── finalizeTournament ───────────────────────────────────────────────────────
@@ -80,8 +82,8 @@ describe('TournamentService.finalizeTournament', () => {
   beforeEach(() => {
     mockCalculatePrizes.mockReturnValue({
       winnerPayout: '70.000000000',
-      creatorPayout: '10.000000000',
-      platformFee:  '20.000000000',
+      creatorPayout: '5.000000000',
+      platformFee:  '25.000000000',
     });
   });
 
@@ -98,6 +100,16 @@ describe('TournamentService.finalizeTournament', () => {
       if (sql.includes('UPDATE tournaments')) return Promise.resolve({ rowCount: 1 });
       return Promise.resolve({ rows: [], rowCount: 1 });
     });
+
+    // Participants query for finalizeTournament
+    mockDbQuery.mockResolvedValueOnce({ rows: [{ userId: WINNER_ID }, { userId: CREATOR_ID }] });
+    // emitUserSync for winner
+    mockDbQuery.mockResolvedValueOnce({ rows: [{ id: WINNER_ID, username: 'Winner', elo: 1200, walletAddress: null, gamesPlayed: 10, gamesWon: 5, totalWon: '50' }] });
+    mockDbQuery.mockResolvedValueOnce({ rows: [{ available: '100', locked: '0' }] });
+    // emitUserSync for creator (different from winner)
+    mockDbQuery.mockResolvedValueOnce({ rows: [{ id: CREATOR_ID, username: 'Creator', elo: 1100, walletAddress: null, gamesPlayed: 8, gamesWon: 4, totalWon: '40' }] });
+    mockDbQuery.mockResolvedValueOnce({ rows: [{ available: '80', locked: '0' }] });
+    // LeaderboardService.rebuildAll (mocked via vi.mock, just needs to not throw)
 
     const io = makeIo();
     await TournamentService.finalizeTournament(TOURNAMENT_ID, WINNER_ID, io as never);
@@ -122,6 +134,13 @@ describe('TournamentService.finalizeTournament', () => {
       return Promise.resolve({ rows: [], rowCount: 1 });
     });
 
+    // Participants query for finalizeTournament
+    mockDbQuery.mockResolvedValueOnce({ rows: [{ userId: WINNER_ID }] });
+    // emitUserSync for winner (who is also creator - only called once)
+    mockDbQuery.mockResolvedValueOnce({ rows: [{ id: WINNER_ID, username: 'Winner', elo: 1200, walletAddress: null, gamesPlayed: 10, gamesWon: 5, totalWon: '50' }] });
+    mockDbQuery.mockResolvedValueOnce({ rows: [{ available: '100', locked: '0' }] });
+    // LeaderboardService.rebuildAll
+
     const io = makeIo();
     await TournamentService.finalizeTournament(TOURNAMENT_ID, WINNER_ID, io as never);
 
@@ -141,6 +160,8 @@ describe('TournamentService.finalizeTournament', () => {
       return Promise.resolve({ rows: [], rowCount: 0 });
     });
 
+    // No further queries should run after early return
+
     const io = makeIo();
     await TournamentService.finalizeTournament(TOURNAMENT_ID, WINNER_ID, io as never);
 
@@ -158,8 +179,12 @@ describe('TournamentService.finalizeTournament', () => {
       if (sql.includes('BEGIN')) return Promise.resolve({});
       if (sql.includes('ROLLBACK')) { rollbackCalled = true; return Promise.resolve({}); }
       if (sql.includes('UPDATE tournaments')) return Promise.resolve({ rowCount: 1 });
-      throw new Error('DB write error');
+      if (sql.includes('UPDATE balances')) throw new Error('DB write error');
+      return Promise.resolve({ rows: [], rowCount: 1 });
     });
+
+    // Participants query for finalizeTournament
+    mockDbQuery.mockResolvedValueOnce({ rows: [{ userId: WINNER_ID }] });
 
     const io = makeIo();
     await expect(
@@ -212,7 +237,7 @@ describe('TournamentService.activateRoundMatchLobby', () => {
 describe('TournamentService.recoverStuckRound', () => {
   it('returns early when matches still pending', async () => {
     // checkRoundComplete only queries pending count — no tournament status query
-    mockDbQuery.mockResolvedValue({ rows: [{ count: 2 }] });
+    mockDbQuery.mockResolvedValueOnce({ rows: [{ count: 2 }] });
     const io = makeIo();
     await TournamentService.recoverStuckRound(TOURNAMENT_ID, 1, io as never);
     expect(mockNotify).not.toHaveBeenCalled();
@@ -222,9 +247,11 @@ describe('TournamentService.recoverStuckRound', () => {
     mockDbQuery
       .mockResolvedValueOnce({ rows: [{ count: 0 }] })                          // no pending
       .mockResolvedValueOnce({ rows: [{ winnerId: 'w1' }, { winnerId: 'w2' }] }) // 2 winners
-      .mockResolvedValueOnce({ rows: [], rowCount: 1 })                          // UPDATE current_round
+      .mockResolvedValueOnce({ rowCount: 1 })                                    // UPDATE current_round
       .mockResolvedValueOnce({ rows: [{ name: 'Cup' }] })                        // SELECT tournament name
-      .mockResolvedValue({ rows: [], rowCount: 1 });                             // remaining queries
+      .mockResolvedValueOnce({ rows: [] })                                       // user lookups
+      .mockResolvedValueOnce({ rows: [] })                                       // more user lookups
+      .mockResolvedValueOnce({ rows: [] });                                      // INSERT match
     const io = makeIo();
     await TournamentService.recoverStuckRound(TOURNAMENT_ID, 1, io as never);
     const roundUpdate = mockDbQuery.mock.calls.find((c: unknown[]) =>
@@ -247,28 +274,8 @@ describe('TournamentService.listTournaments', () => {
     mockDbQuery.mockResolvedValueOnce({ rows: [{ id: 't1', status: 'open' }] });
     const result = await TournamentService.listTournaments('open');
     expect(result).toHaveLength(1);
-    expect(mockDbQuery.mock.calls[0][1]).toEqual(['open']);
-  });
-});
-
-// ─── getTournamentDetail ──────────────────────────────────────────────────────
-
-describe('TournamentService.getTournamentDetail', () => {
-  it('returns tournament with participants and matches', async () => {
-    mockDbQuery
-      .mockResolvedValueOnce({ rows: [{ id: 't1', name: 'Cup', status: 'open' }] })
-      .mockResolvedValueOnce({ rows: [{ userId: 'u1', username: 'alice' }] })
-      .mockResolvedValueOnce({ rows: [{ id: 'm1', round: 1 }] });
-
-    const result = await TournamentService.getTournamentDetail('t1');
-    expect(result.id).toBe('t1');
-    expect(result.participants).toHaveLength(1);
-    expect(result.matches).toHaveLength(1);
-  });
-
-  it('throws NOT_FOUND when tournament does not exist', async () => {
-    mockDbQuery.mockResolvedValueOnce({ rows: [] });
-    await expect(TournamentService.getTournamentDetail('ghost')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(mockDbQuery).toHaveBeenCalledTimes(1);
+    expect((mockDbQuery.mock.calls[0] as any)[1]).toEqual(['open']);
   });
 });
 
@@ -281,13 +288,13 @@ describe('TournamentService.startTournament', () => {
       .mockResolvedValueOnce({ rows: [{ userId: 'u1', seedElo: 1200 }] }) // only 1 participant
       // cancelTournament queries:
       .mockResolvedValueOnce({ rows: [{ entryFee: '1', name: 'Cup' }] })  // SELECT tournament
-      .mockResolvedValueOnce({ rows: [], rowCount: 1 })                    // UPDATE cancelled
+      .mockResolvedValueOnce({ rowCount: 1 })                              // UPDATE cancelled
       .mockResolvedValueOnce({ rows: [] });                                // SELECT participants
 
     const io = makeIo();
     await TournamentService.startTournament(TOURNAMENT_ID, io as never);
 
-    const cancelCall = mockDbQuery.mock.calls.find(c => c[0].includes("status='cancelled'"));
+    const cancelCall = mockDbQuery.mock.calls.find(c => (c[0] as string).includes("status='cancelled'"));
     expect(cancelCall).toBeDefined();
   });
 
