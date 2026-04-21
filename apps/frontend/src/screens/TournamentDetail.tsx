@@ -166,7 +166,7 @@ export function TournamentDetail() {
         const remaining = Math.max(0, Math.ceil((data.expiresAt - Date.now()) / 1000));
         setPhase('presence');
         setPresenceKind('start_wait');
-        setStatusMsg('Waiting for players to join/accept…');
+        setStatusMsg('Generating Bracket and Pairing Players');
         setPhaseCountdown(remaining);
       }),
 
