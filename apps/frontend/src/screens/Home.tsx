@@ -103,6 +103,6 @@ const styles: Record<string, React.CSSProperties> = {
   modeSubtitle: { color:'var(--tg-theme-hint-color)', fontSize:12 },
   walletRow:    { display:'flex', gap:12, marginBottom:12 },
   walletBtn:    { flex:1, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'14px', color:'var(--tg-theme-text-color)', fontSize:15, fontWeight:500, cursor:'pointer' },
-  communityBtn: { width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'12px 14px', color:'#2AABEE', fontSize:14, fontWeight:600, cursor:'pointer' },
+  communityBtn: { width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'12px 14px', color:'#f1f5f7ff', fontSize:14, fontWeight:600, cursor:'pointer' },
   tgIcon:       { fontSize:16 },
 };
