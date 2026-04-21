@@ -97,7 +97,7 @@ const styles: Record<string, React.CSSProperties> = {
   eloValue:     { color:'#2AABEE', fontSize:16, fontWeight:600 },
   grid:         { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 },
   modeCard:     { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:16, padding:'12px 8px', display:'flex', flexDirection:'column', alignItems:'center', gap:4, cursor:'pointer', textAlign:'center' },
-  primaryCard:  { background:'#2AABEE', gridColumn:'1 / -1' },
+  primaryCard:  { background:'#343738ff', gridColumn:'1 / -1' },
   modeEmoji:    { fontSize:28 },
   modeTitle:    { color:'var(--tg-theme-text-color)', fontWeight:600, fontSize:15 },
   modeSubtitle: { color:'var(--tg-theme-hint-color)', fontSize:12 },
