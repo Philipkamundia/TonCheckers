@@ -76,8 +76,8 @@ function ModeCard({ emoji, title, subtitle, onClick, primary }: {
   return (
     <button style={{ ...styles.modeCard, ...(primary ? styles.primaryCard : {}) }} onClick={onClick}>
       <span style={styles.modeEmoji}>{emoji}</span>
-      <span style={styles.modeTitle}>{title}</span>
-      <span style={styles.modeSubtitle}>{subtitle}</span>
+      <span style={{ ...styles.modeTitle,    ...(primary ? { color: '#fff' } : {}) }}>{title}</span>
+      <span style={{ ...styles.modeSubtitle, ...(primary ? { color: 'rgba(255,255,255,0.85)' } : {}) }}>{subtitle}</span>
     </button>
   );
 }
@@ -86,8 +86,8 @@ const styles: Record<string, React.CSSProperties> = {
   container:    { padding:'16px', background:'var(--tg-theme-bg-color)', minHeight:'100vh' },
   topBar:       { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 },
   greeting:     { color:'var(--tg-theme-hint-color)', fontSize:13, margin:0 },
-  profileBtn:   { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:'50%', width:36, height:36, fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
-  balanceCard:  { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:20, marginBottom:20 },
+  profileBtn:   { background:'var(--tg-theme-secondary-bg-color)', border:'var(--card-border)', borderRadius:'50%', width:36, height:36, fontSize:18, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' },
+  balanceCard:  { background:'var(--tg-theme-secondary-bg-color)', border:'var(--card-border)', borderRadius:16, padding:20, marginBottom:20 },
   balanceRow:   { display:'flex', justifyContent:'space-between', alignItems:'center' },
   balanceLabel: { color:'var(--tg-theme-hint-color)', fontSize:14 },
   balanceValue: { color:'var(--tg-theme-text-color)', fontSize:28, fontWeight:700 },
@@ -96,13 +96,13 @@ const styles: Record<string, React.CSSProperties> = {
   eloLabel:     { color:'var(--tg-theme-hint-color)', fontSize:13 },
   eloValue:     { color:'#2AABEE', fontSize:16, fontWeight:600 },
   grid:         { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 },
-  modeCard:     { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:16, padding:'12px 8px', display:'flex', flexDirection:'column', alignItems:'center', gap:4, cursor:'pointer', textAlign:'center' },
-  primaryCard:  { background:''#2AABEE', gridColumn:'1 / -1' },
+  modeCard:     { background:'var(--tg-theme-secondary-bg-color)', border:'var(--card-border)', borderRadius:16, padding:'12px 8px', display:'flex', flexDirection:'column', alignItems:'center', gap:4, cursor:'pointer', textAlign:'center' },
+  primaryCard:  { background:'#2AABEE', border:'none', gridColumn:'1 / -1' },
   modeEmoji:    { fontSize:28 },
   modeTitle:    { color:'var(--tg-theme-text-color)', fontWeight:600, fontSize:15 },
   modeSubtitle: { color:'var(--tg-theme-hint-color)', fontSize:12 },
   walletRow:    { display:'flex', gap:12, marginBottom:12 },
-  walletBtn:    { flex:1, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'14px', color:'var(--tg-theme-text-color)', fontSize:15, fontWeight:500, cursor:'pointer' },
-  communityBtn: { width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8, background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:12, padding:'12px 14px', color:'#f1f5f7ff', fontSize:14, fontWeight:600, cursor:'pointer' },
+  walletBtn:    { flex:1, background:'var(--tg-theme-secondary-bg-color)', border:'var(--card-border)', borderRadius:12, padding:'14px', color:'var(--tg-theme-text-color)', fontSize:15, fontWeight:500, cursor:'pointer' },
+  communityBtn: { width:'100%', display:'flex', alignItems:'center', justifyContent:'center', gap:8, background:'var(--tg-theme-secondary-bg-color)', border:'var(--card-border)', borderRadius:12, padding:'12px 14px', color:'var(--tg-theme-text-color)', fontSize:14, fontWeight:600, cursor:'pointer' },
   tgIcon:       { fontSize:16 },
 };

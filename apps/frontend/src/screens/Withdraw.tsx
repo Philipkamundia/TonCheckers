@@ -162,8 +162,8 @@ export function Withdraw() {
       </div>
 
       {result && !result.success && (
-        <div style={{ ...styles.result, background: '#FFEBEE' }}>
-          <p style={{ color: '#C62828', margin: 0 }}>{result.message}</p>
+        <div style={{ ...styles.result, background: 'rgba(229,57,53,0.10)', border: '1px solid rgba(229,57,53,0.3)' }}>
+          <p style={{ color: 'var(--tg-theme-destructive-text-color)', margin: 0 }}>{result.message}</p>
         </div>
       )}
 

@@ -327,6 +327,10 @@ export function App() {
       if (p.button_color)       root.style.setProperty('--tg-theme-button-color',         p.button_color);
       if (p.button_text_color)  root.style.setProperty('--tg-theme-button-text-color',    p.button_text_color);
       if (p.destructive_text_color) root.style.setProperty('--tg-theme-destructive-text-color', p.destructive_text_color);
+      // Keep card border in sync with Telegram's own dark/light scheme
+      const isDark = tg.colorScheme === 'dark';
+      root.style.setProperty('--card-border',
+        isDark ? '1px solid rgba(255,255,255,0.07)' : '1px solid rgba(0,0,0,0.08)');
     };
 
     applyTheme();

@@ -219,8 +219,8 @@ export function AdminDashboard() {
             onClick={() => openTab(t.id)}
           >
             <span style={s.cardEmoji}>{t.emoji}</span>
-            <span style={s.cardTitle}>{t.label}</span>
-            <span style={s.cardSub}>{t.sub}</span>
+            <span style={{ ...s.cardTitle, ...(i === 0 ? { color: '#fff' } : {}) }}>{t.label}</span>
+            <span style={{ ...s.cardSub,   ...(i === 0 ? { color: 'rgba(255,255,255,0.8)' } : {}) }}>{t.sub}</span>
           </button>
         ))}
       </div>
@@ -478,7 +478,7 @@ const s: Record<string, React.CSSProperties> = {
   refreshBtn:     { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:8, padding:'6px 12px', fontSize:13, cursor:'pointer', color:'var(--tg-theme-text-color)' },
 
   // summary card
-  summaryCard:    { background:'var(--tg-theme-secondary-bg-color)', borderRadius:16, padding:16, marginBottom:16 },
+  summaryCard:    { background:'var(--tg-theme-secondary-bg-color)', border:'var(--card-border)', borderRadius:16, padding:16, marginBottom:16 },
   sectionLabel:   { color:'var(--tg-theme-hint-color)', fontSize:11, fontWeight:600, textTransform:'uppercase', letterSpacing:0.5, margin:'0 0 12px' },
   statsGrid:      { display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 },
   statItem:       { textAlign:'center' },
@@ -487,8 +487,8 @@ const s: Record<string, React.CSSProperties> = {
 
   // nav grid
   grid:           { display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:16 },
-  card:           { background:'var(--tg-theme-secondary-bg-color)', border:'none', borderRadius:16, padding:'18px 12px', display:'flex', flexDirection:'column', alignItems:'center', gap:4, cursor:'pointer', textAlign:'center' },
-  cardPrimary:    { background:'#2AABEE', gridColumn:'1 / -1' },
+  card:           { background:'var(--tg-theme-secondary-bg-color)', border:'var(--card-border)', borderRadius:16, padding:'18px 12px', display:'flex', flexDirection:'column', alignItems:'center', gap:4, cursor:'pointer', textAlign:'center' },
+  cardPrimary:    { background:'#2AABEE', border:'none', gridColumn:'1 / -1' },
   cardEmoji:      { fontSize:28 },
   cardTitle:      { color:'var(--tg-theme-text-color)', fontWeight:600, fontSize:15, margin:0 },
   cardSub:        { color:'var(--tg-theme-hint-color)', fontSize:12, margin:0 },

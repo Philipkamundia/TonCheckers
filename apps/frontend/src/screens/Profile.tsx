@@ -7,30 +7,12 @@ import { useTonConnectUI } from '@tonconnect/ui-react';
 import { useTelegram } from '../hooks/useTelegram';
 import { useStore } from '../store';
 import { balanceApi } from '../services/api';
+import type { Theme } from '../theme';
+import { applyTheme } from '../theme';
 
-type Theme = 'system' | 'light' | 'dark';
-
-export function applyTheme(theme: Theme) {
-  const root = document.documentElement;
-  if (theme === 'dark') {
-    root.style.setProperty('--tg-theme-bg-color',           '#1c1c1e');
-    root.style.setProperty('--tg-theme-secondary-bg-color', '#2c2c2e');
-    root.style.setProperty('--tg-theme-text-color',         '#ffffff');
-    root.style.setProperty('--tg-theme-hint-color',         '#8e8e93');
-  } else if (theme === 'light') {
-    root.style.setProperty('--tg-theme-bg-color',           '#f2f2f7');
-    root.style.setProperty('--tg-theme-secondary-bg-color', '#ffffff');
-    root.style.setProperty('--tg-theme-text-color',         '#000000');
-    root.style.setProperty('--tg-theme-hint-color',         '#6d6d72');
-  }
-  // 'system' — Telegram's theme vars take over; clear overrides
-  if (theme === 'system') {
-    root.style.removeProperty('--tg-theme-bg-color');
-    root.style.removeProperty('--tg-theme-secondary-bg-color');
-    root.style.removeProperty('--tg-theme-text-color');
-    root.style.removeProperty('--tg-theme-hint-color');
-  }
-}
+// Theme type and applyTheme are the single source of truth in theme.ts.
+// Re-exported here so App.tsx keeps its existing import path unchanged.
+export { type Theme, applyTheme } from '../theme';
 
 export function Profile() {
   const { showBackButton, hideMainButton, haptic } = useTelegram();
@@ -194,7 +176,7 @@ const s: Record<string, React.CSSProperties> = {
   avatar:         { width: 72, height: 72, borderRadius: '50%', background: '#2AABEE', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 700, color: '#fff', marginBottom: 12 },
   username:       { color: 'var(--tg-theme-text-color)', fontSize: 22, fontWeight: 700, margin: 0 },
   elo:            { color: '#2AABEE', fontSize: 14, fontWeight: 600, margin: '4px 0 0' },
-  card:           { background: 'var(--tg-theme-secondary-bg-color)', borderRadius: 16, padding: '16px', marginBottom: 12 },
+  card:           { background: 'var(--tg-theme-secondary-bg-color)', border: 'var(--card-border)', borderRadius: 16, padding: '16px', marginBottom: 12 },
   sectionTitle:   { color: 'var(--tg-theme-hint-color)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, margin: '0 0 10px' },
   statsGrid:      { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 4 },
   addrRow:        { width: '100%', background: 'rgba(128,128,128,0.1)', border: 'none', borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: 10 },

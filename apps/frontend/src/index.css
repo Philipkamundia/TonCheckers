@@ -1,20 +1,28 @@
 /* Telegram Mini App Global Styles
- * All colours use Telegram CSS variables so light/dark mode works automatically
- * PRD §16: UI uses Telegram native theme variables — respects user light/dark mode
+ * All colours use Telegram CSS variables so light/dark mode works automatically.
+ * PRD §16: UI uses Telegram native theme variables — respects user light/dark mode.
+ *
+ * The `--card-border` variable is set by theme.ts at runtime:
+ *   dark  → rgba(255,255,255,0.07)  subtle highlight edge
+ *   light → rgba(0,0,0,0.08)        subtle shadow edge
  */
 
 *, *::before, *::after { box-sizing: border-box; }
 
 :root {
-  /* Fallback values — overridden by Telegram theme at runtime */
-  --tg-theme-bg-color:             #ffffff;
-  --tg-theme-secondary-bg-color:   #f0f0f0;
-  --tg-theme-text-color:           #000000;
-  --tg-theme-hint-color:           #999999;
-  --tg-theme-link-color:           #2AABEE;
-  --tg-theme-button-color:         #2AABEE;
-  --tg-theme-button-text-color:    #ffffff;
-  --tg-theme-destructive-text-color: #E53935;
+  /* ── Fallback values — overridden by Telegram theme + theme.ts at runtime ── */
+  /* Default to dark so the app looks correct before JS hydrates.              */
+  --tg-theme-bg-color:               #1c1c1e;
+  --tg-theme-secondary-bg-color:     #2c2c2e;
+  --tg-theme-text-color:             #ffffff;
+  --tg-theme-hint-color:             #8e8e93;
+  --tg-theme-link-color:             #2AABEE;
+  --tg-theme-button-color:           #2AABEE;
+  --tg-theme-button-text-color:      #ffffff;
+  --tg-theme-destructive-text-color: #ff3b30;
+
+  /* Card border — updated per-theme by theme.ts; safe default is dark-mode edge */
+  --card-border: 1px solid rgba(255,255,255,0.07);
 }
 
 html, body, #root {
@@ -28,7 +36,7 @@ html, body, #root {
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
   -webkit-user-select: none;
-  user-select: none;
+  user-select: auto;
 }
 
 input, textarea {
@@ -37,6 +45,20 @@ input, textarea {
 }
 
 button { -webkit-tap-highlight-color: transparent; }
+
+/* ── Theme transition ────────────────────────────────────────────────────────
+ * Temporarily added by applyTheme() in theme.ts when the user switches theme.
+ * Removed after 350 ms so it does NOT affect game animations, spinners, etc.
+ * ─────────────────────────────────────────────────────────────────────────── */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition:
+    background-color 0.25s ease,
+    color            0.2s  ease,
+    border-color     0.2s  ease !important;
+}
 
 /* Smooth scrolling for content areas */
 .scroll-area {
